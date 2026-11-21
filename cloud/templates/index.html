@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RGB Perimeter Security Demo</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <p class="eyebrow">MQTT | EDGE + CLOUD OBJECT DETECTION</p>
+        <h1>RGB Perimeter Security</h1>
+        <p>Select or upload an image. YOLO11n runs at the simulated edge; YOLO11m verifies risky or uncertain detections on the laptop cloud.</p>
+      </div>
+      <div id="status" class="status waiting">Starting models...</div>
+    </header>
+
+    <section>
+      <h2>Demonstration images</h2>
+      <p class="hint">Choose any offline sample. The models receive only the image.</p>
+      <div id="image-list" class="image-grid"></div>
+
+      <div class="upload-block">
+        <h3>Try your own image</h3>
+        <label id="drop-zone" class="drop-zone" for="image-upload">
+          <input id="image-upload" type="file" accept="image/jpeg,image/png,image/webp" hidden>
+          <strong>Drop an image here</strong>
+          <span>or click to choose a JPG, PNG, or WebP file up to 8 MB</span>
+          <em>Choose image</em>
+        </label>
+        <p class="upload-note">The image is kept only in memory while the application is running. Its filename is shown, but no object tag is requested.</p>
+      </div>
+    </section>
+
+    <section class="models">
+      <article><b>Edge</b><h3>YOLO11n | 416 px</h3><p>Small object detector on the Windows CPU. Later deployment target: Jetson TensorRT.</p></article>
+      <article><b>Cloud</b><h3>YOLO11m | 640 px</h3><p>Larger detector on the laptop. Runs for people, vehicles, or uncertain edge results.</p></article>
+      <article><b>MQTT</b><h3>Compact metadata</h3><p>The broker carries an image URL and detections, not raw image bytes or video.</p></article>
+    </section>
+
+    <section id="latest" class="latest hidden">
+      <div class="section-title"><h2>Latest result</h2><span id="latest-alert"></span></div>
+      <div class="comparison">
+        <figure><img id="input-image" alt="Selected RGB input"><figcaption>RGB input</figcaption></figure>
+        <figure><img id="result-image" alt="Object detection result"><figcaption id="result-caption">Detection result</figcaption></figure>
+      </div>
+      <div class="decision">
+        <div><small>EDGE RESULT</small><strong id="edge-result">-</strong></div>
+        <div><small>FINAL RESULT</small><strong id="final-result">-</strong></div>
+        <div><small>EXECUTED ON</small><strong id="location">-</strong></div>
+        <p id="reason"></p>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-title"><h2>Perimeter events</h2><button id="clear">Clear events</button></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Time</th><th>Image</th><th>Edge</th><th>Final</th><th>Location</th><th>Latency</th></tr></thead>
+          <tbody id="events"><tr><td colspan="6" class="empty">No detections yet.</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="logs"><h2>Application logs</h2><pre id="logs">Waiting for an RGB image event...</pre></section>
+  </main>
+  <div id="toast" class="toast"></div>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
