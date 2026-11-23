@@ -146,13 +146,41 @@ async function refreshEvents() {
   }
 }
 
+function renderVibrationEvents(events) {
+  if (!events.length) {
+    byId("vibration-events").innerHTML = '<tr><td colspan="6" class="empty">Waiting for vibration windows...</td></tr>';
+    return;
+  }
+  byId("vibration-events").innerHTML = events.map(event => `
+    <tr>
+      <td>${new Date(event.received_at).toLocaleTimeString()}</td>
+      <td><span class="result ${event.alert ? "danger" : ""}">${escapeHtml(event.classification)}</span></td>
+      <td>${(Number(event.confidence) * 100).toFixed(1)}%</td>
+      <td>${Number(event.rms_g).toFixed(4)} g</td>
+      <td>${Number(event.peak_g).toFixed(4)} g</td>
+      <td>${Number(event.latency_ms).toFixed(2)} ms</td>
+    </tr>`).join("");
+}
+
+async function refreshVibrationEvents() {
+  try {
+    renderVibrationEvents((await api("/api/vibration-events?limit=12")).events);
+  } catch (error) {
+    console.error(error);
+  }
+}
+
 async function refreshStatus() {
   try {
     const data = await api("/api/status");
-    const online = data.mqtt_broker.status === "ok" && data.edge.status === "online";
+    const online = data.mqtt_broker.status === "ok"
+      && data.edge.status === "online"
+      && (!data.webots_mode || data.vibration_edge.status === "online");
     byId("status").textContent = online
-      ? `ONLINE | ${data.edge.model} edge | ${data.cloud.model} cloud`
-      : "WAITING FOR EDGE";
+      ? (data.webots_mode
+        ? `ONLINE | ${data.edge.model} camera | ${data.vibration_edge.model} vibration | ${data.cloud.model} cloud`
+        : `ONLINE | ${data.edge.model} edge | ${data.cloud.model} cloud`)
+      : "WAITING FOR EDGE DEVICES";
     byId("status").className = `status ${online ? "online" : "waiting"}`;
   } catch {
     byId("status").textContent = "APPLICATION OFFLINE";
@@ -162,11 +190,14 @@ async function refreshStatus() {
 byId("clear").addEventListener("click", async () => {
   await api("/api/reset", {method: "POST"});
   await refreshEvents();
+  await refreshVibrationEvents();
 });
 
 configureDropZone();
 loadImages().catch(error => toast(error.message, true));
 refreshStatus();
 refreshEvents();
+refreshVibrationEvents();
 setInterval(refreshStatus, 3000);
 setInterval(refreshEvents, 2000);
+setInterval(refreshVibrationEvents, 2000);

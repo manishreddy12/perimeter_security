@@ -12,7 +12,7 @@
       <div>
         <p class="eyebrow">MQTT | EDGE + CLOUD OBJECT DETECTION</p>
         <h1>RGB Perimeter Security</h1>
-        <p>Select or upload an image. YOLO11n runs at the simulated edge; YOLO11m verifies risky or uncertain detections on the laptop cloud.</p>
+        <p>The camera edge runs YOLO11n. Optional Webots mode adds a low-power vibration edge and sends both edge results through a simulated gateway.</p>
       </div>
       <div id="status" class="status waiting">Starting models...</div>
     </header>
@@ -35,7 +35,8 @@
     </section>
 
     <section class="models">
-      <article><b>Edge</b><h3>YOLO11n | 416 px</h3><p>Small object detector on the Windows CPU. Later deployment target: Jetson TensorRT.</p></article>
+      <article><b>Edge</b><h3>YOLO11n | 416 px</h3><p>Logical camera edge normally; simulated Jetson controller in Webots mode. Both execute on the laptop CPU.</p></article>
+      <article><b>Optional Webots edge</b><h3>Vibration | 1D CNN</h3><p>512 MB, 2 W descriptive profile. Press V in Webots mode to inject a vibration window.</p></article>
       <article><b>Cloud</b><h3>YOLO11m | 640 px</h3><p>Larger detector on the laptop. Runs for people, vehicles, or uncertain edge results.</p></article>
       <article><b>MQTT</b><h3>Compact metadata</h3><p>The broker carries an image URL and detections, not raw image bytes or video.</p></article>
     </section>
@@ -60,6 +61,16 @@
         <table>
           <thead><tr><th>Time</th><th>Image</th><th>Edge</th><th>Final</th><th>Location</th><th>Latency</th></tr></thead>
           <tbody id="events"><tr><td colspan="6" class="empty">No detections yet.</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-title"><h2>Vibration sensor events</h2><span class="sensor-hint">64 samples per window</span></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Time</th><th>Classification</th><th>Confidence</th><th>RMS</th><th>Peak</th><th>1D CNN latency</th></tr></thead>
+          <tbody id="vibration-events"><tr><td colspan="6" class="empty">Waiting for vibration windows...</td></tr></tbody>
         </table>
       </div>
     </section>

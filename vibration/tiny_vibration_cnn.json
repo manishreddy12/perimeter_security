@@ -1,0 +1,13 @@
+{
+  "model": "TinyVibrationCNN",
+  "classes": [
+    "normal",
+    "vibration_anomaly"
+  ],
+  "window_size": 64,
+  "sample_rate_hz": 31.25,
+  "parameters": 482,
+  "training_source": "synthetic demonstration signals",
+  "training_accuracy": 1.0,
+  "limitation": "Training accuracy measures synthetic-rule fit, not field accuracy."
+}

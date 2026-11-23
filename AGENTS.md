@@ -4,7 +4,7 @@ This file is the starting point for any coding agent or maintainer working in th
 
 ## Project goal
 
-This is a college project demonstrating ML inference split between a logical edge device and a laptop acting as cloud infrastructure. The working communication path is MQTT. The long-term architecture also discusses LoRaWAN, gateways, real sensors, Jetson-class hardware, carbon-aware offloading, SCI calculations, metrics, and logging, but not all of those parts are implemented yet.
+This is a college project demonstrating ML inference split between a logical edge device and a laptop acting as cloud infrastructure. The default mode uses MQTT. Webots mode adds simulated LoRaWAN uplinks and a gateway. The long-term architecture also discusses LoRaWAN, gateways, real sensors, Jetson-class hardware, carbon-aware offloading, SCI calculations, metrics, and logging, but not all of those parts are implemented yet.
 
 The workspace intentionally contains two separate demonstrations:
 
@@ -27,6 +27,7 @@ Location: `perimeter_security_demo/`
 - OpenCV draws the selected model's bounding boxes.
 - SQLite stores events, detections, latency, decision reason, alert state, and the annotated JPEG.
 - A local Flask dashboard shows samples, uploads, results, logs, and service state.
+- Webots mode adds a second 512 MB, 2 W vibration-edge profile running a 482-parameter 1D CNN over 64-sample windows.
 
 This is an execution-flow simulation, not a hardware or performance simulation. Both models currently run on the Windows laptop CPU. `edge` and `cloud` are separate logical services. A real Jetson target should use YOLO11n exported to TensorRT and measured on the physical GPU.
 
@@ -174,6 +175,12 @@ Actual inference logs begin with `[edge]` or `[cloud]` and mention the image/eve
 - `config.py`: shared ports, URLs, topics, model paths, samples, IDs, and class sets.
 - `broker/app.py`: embedded aMQTT broker; routes messages only.
 - `edge/app.py`: YOLO11n and offloading logic.
+- `vibration/model.py`: 482-parameter 1D CNN architecture.
+- `vibration/train_model.py`: reproducible synthetic training and checkpoint metadata.
+- `vibration/payload.py`: compact 29-byte vibration application payload.
+- `webots/controllers/vibration_edge/`: accelerometer windowing and 1D CNN inference.
+- `gateway/radio.py`: multi-device LoRaWAN framing, encryption, MIC, counters, and reassembly.
+- `gateway/network_server.py`: gateway backhaul decoding and MQTT publication.
 - `cloud/app.py`: Flask API, temporary upload store, YOLO11m, annotation, database, alerts, and MQTT result handler.
 - `sensor/mock_sensor.py`: optional MQTT camera-event publisher.
 - `cloud/templates/index.html`: dashboard markup.
@@ -182,6 +189,7 @@ Actual inference logs begin with `[edge]` or `[cloud]` and mention the image/eve
 - `cloud/static/*.jpg`: nine offline sample images.
 - `tests/test_models.py`: current automated checks.
 - `docs/README.md`: detailed request flow and presentation instructions.
+- `docs/IMPLEMENTATION.md`: consolidated implementation, communication, API, persistence, validation, and limitation reference.
 - `perimeter_events.db`: generated runtime database; do not treat it as source data.
 - `yolo11n.pt` and `yolo11m.pt`: required pretrained checkpoints; keep them unless model strategy changes intentionally.
 
@@ -195,13 +203,13 @@ From `perimeter_security_demo/`:
 node --check cloud\static\app.js
 ```
 
-There are currently seven Python tests covering weights, samples, topics, summaries, offloading, and answer-free preset/upload events.
+There are currently fourteen Python tests covering weights, samples, topics, summaries, offloading, answer-free preset/upload events, launcher-mode status, the vibration CNN, two-device keys, compact payloads, tampering, fragmentation, and replay rejection.
 
 ### RGB application facts that must remain honest
 
 - YOLO11n and YOLO11m are different model scales loaded through the same Ultralytics `YOLO` class.
 - Local weights are approximately 5.6 MB and 40.7 MB respectively.
-- The edge is presently Windows CPU simulation, not Webots and not a Jetson GPU.
+- Both edge modes use the Windows CPU. Webots mode hosts the edge controller in its simulated world.
 - The same Python approach can be moved to Jetson, but TensorRT export, CUDA device selection, and physical measurement remain future work.
 - COCO benchmark performance is not the same as accuracy at the intended perimeter site.
 - The dashboard samples and user uploads do not provide ground-truth evaluation labels.
@@ -285,7 +293,7 @@ Never present these numbers as real-world field accuracy. This prototype demonst
 
 ## LoRaWAN and gateway status
 
-LoRaWAN is an architectural requirement/future path, not a working part of either current demo.
+The RGB Webots mode carries LoRaWAN 1.0 ABP uplinks over simulated radio. The default launcher mode and previous prototype use MQTT.
 
 - RGB images are too large for practical LoRaWAN transport.
 - In a physical design, the edge should run image inference locally.
@@ -293,7 +301,7 @@ LoRaWAN is an architectural requirement/future path, not a working part of eithe
 - Selected images should use Wi-Fi, Ethernet, cellular, or another IP path.
 - A real LoRaWAN path requires radio end devices, a LoRaWAN gateway, a network server, and MQTT/application integration.
 - The MQTT broker is not a LoRaWAN gateway.
-- Any empty `gateway/` folder is a placeholder only; do not claim a gateway is implemented.
+- The Webots gateway controller relays frames to the local network server in gateway/network_server.py.
 
 ## Resource documents
 
@@ -337,3 +345,9 @@ Before declaring a change complete:
 7. Remove temporary downloads and generated test databases/events.
 8. Update application docs and this guide if architecture or behavior changed.
 
+
+## Webots mode in this RGB-only checkout
+
+The RGB application is at the checkout root. The optional run_demo.py --webots mode starts a functional NVIDIA Jetson Nano profile, a separate fixed low-power vibration edge, and the gateway controller in Webots. The vibration box has no physical dynamics and its controller supplies reproducible synthetic sensor samples, so it cannot slide or fall. YOLO11n and the tiny 1D CNN execute on the Windows laptop CPU, so measured latency is laptop latency. The camera profile is 4 GB and 10 W. The vibration profile is 512 MB and 2 W. These values are descriptive simulation metadata. Both devices have separate ABP addresses and keys and send results over simulated LoRaWAN radio. The gateway uses localhost UDP 16803 for backhaul to the local Python network server, which publishes results over MQTT. The vibration checkpoint is trained on reproducible synthetic signals and must not be presented as field accuracy. Physical radio behavior remains future work.
+
+The `scene_labels` supervisor adds a fixed legend to the Webots 3D view. On Windows, service children share the launcher's console group, and the launcher ignores further SIGINT signals after the first one so repeated Ctrl+C cannot interrupt process-tree cleanup.

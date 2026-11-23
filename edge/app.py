@@ -83,12 +83,16 @@ class EdgeVisionModel:
     def __init__(self) -> None:
         print(f"[edge] loading YOLO11n from {EDGE_MODEL_PATH.name}", flush=True)
         self.model = YOLO(str(EDGE_MODEL_PATH))
+        self.inference_lock = threading.Lock()
 
     def predict(self, image_url: str) -> dict[str, object]:
-        image = load_image(image_url)
-        started = time.perf_counter()
-        result = self.model.predict(image, imgsz=416, conf=0.25, device="cpu", verbose=False)[0]
-        latency_ms = (time.perf_counter() - started) * 1000.0
+        return self.predict_frame(load_image(image_url))
+
+    def predict_frame(self, image: np.ndarray) -> dict[str, object]:
+        with self.inference_lock:
+            started = time.perf_counter()
+            result = self.model.predict(image, imgsz=416, conf=0.25, device="cpu", verbose=False)[0]
+            latency_ms = (time.perf_counter() - started) * 1000.0
         detections = security_detections(result)
         return {
             "summary": summarize(detections),
@@ -100,8 +104,21 @@ class EdgeVisionModel:
 
 
 class EdgeService:
-    def __init__(self, broker_host: str, broker_port: int, source: str) -> None:
+    def __init__(
+        self,
+        broker_host: str,
+        broker_port: int,
+        source: str,
+        publish_result=None,
+        device_profile: dict[str, object] | None = None,
+    ) -> None:
         self.source = source
+        self.publish_result = publish_result
+        self.device_profile = device_profile or {
+            "device": "Logical edge service",
+            "simulation": "Python process",
+            "execution_host": "Windows laptop CPU",
+        }
         self.model = EdgeVisionModel()
         self.processed = 0
         self.connected = threading.Event()
@@ -125,7 +142,10 @@ class EdgeService:
             "edge_id": EDGE_ID,
             "source": self.source,
             "model": "YOLO11n",
-            "runtime": "Windows CPU simulation; TensorRT is the later Jetson target",
+            "device": self.device_profile["device"],
+            "runtime": self.device_profile["simulation"],
+            "execution_host": self.device_profile["execution_host"],
+            "device_profile": self.device_profile,
             "events_processed": self.processed,
             "timestamp": now_iso(),
         }
@@ -152,25 +172,31 @@ class EdgeService:
                 print(f"[edge] ignored malformed camera event on {message.topic}", flush=True)
                 return
             prediction = self.model.predict(str(event["image_url"]))
-            location, reason = choose_location(str(prediction["summary"]), prediction["detections"])
-            result = {
-                "event_id": event["event_id"],
-                "timestamp": now_iso(),
-                "camera_event": event,
-                "edge_result": prediction,
-                "offload": {"selected_location": location, "reason": reason},
-                "edge_runtime": self.status("online"),
-            }
-            client.publish(edge_topic(), json.dumps(result), qos=MQTT_QOS)
-            self.processed += 1
-            self.publish_status()
-            print(
-                f"[edge] {event['image_name']} -> {prediction['summary']} -> {location} "
-                f"({prediction['latency_ms']:.0f} ms)",
-                flush=True,
-            )
+            self.report_result(event, prediction)
         except Exception as exc:
             print(f"[edge] failed to process image event: {exc}", flush=True)
+
+    def report_result(self, event, prediction) -> None:
+        location, reason = choose_location(str(prediction["summary"]), prediction["detections"])
+        result = {
+            "event_id": event["event_id"],
+            "timestamp": now_iso(),
+            "camera_event": event,
+            "edge_result": prediction,
+            "offload": {"selected_location": location, "reason": reason},
+            "edge_runtime": self.status("online"),
+        }
+        if self.publish_result is None:
+            self.client.publish(edge_topic(), json.dumps(result), qos=MQTT_QOS)
+        else:
+            self.publish_result(result)
+        self.processed += 1
+        self.publish_status()
+        print(
+            f"[edge] {event['image_name']} -> {prediction['summary']} -> {location} "
+            f"({prediction['latency_ms']:.0f} ms)",
+            flush=True,
+        )
 
     def run(self) -> None:
         self.client.loop_start()

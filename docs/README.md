@@ -1,10 +1,16 @@
 # Project notes
 
+The consolidated implementation reference is available in [IMPLEMENTATION.md](IMPLEMENTATION.md).
+
 ## What the demonstration proves
 
 The application performs actual neural-network object detection on RGB images. YOLO11n always runs first as the simulated edge model. A confidence/risk rule either accepts that result or asks the laptop to run the larger YOLO11m model.
 
-This is an execution-flow simulation, not a hardware simulation. Both models currently use the laptop CPU. The words `edge` and `cloud` describe logical locations implemented as separate MQTT services.
+The default mode simulates the execution flow. The optional Webots mode also supplies simulated camera, GPS, and radio devices. Both models currently use the laptop CPU. The words `edge` and `cloud` describe logical locations implemented as separate MQTT services.
+
+Webots mode also includes a second fixed low-power edge device with a reproducible synthetic vibration input and a 482-parameter 1D CNN. The box has no physical dynamics and cannot slide or fall. It classifies non-overlapping 64-sample windows as `normal` or `vibration_anomaly`. Every fourth window includes an automatic demonstration disturbance, and pressing `V` injects one manually. The model was trained from synthetic waveforms and demonstrates inference flow rather than physical-site accuracy.
+
+Resource profiles are 4 GB and 10 W for the simulated Jetson Nano camera edge, and 512 MB and 2 W for the vibration edge. The profiles are metadata and do not constrain or reserve laptop resources.
 
 ## Event flow
 
@@ -266,3 +272,7 @@ If the cloud must rerun object detection, the selected image should travel throu
 - If packages are missing, run `.\myenv\Scripts\python.exe -m pip install -r requirements.txt`.
 - If an image produces no relevant box, remember that only person, vehicle, and animal COCO classes are retained.
 - Browser uploads support JPG, PNG, and WebP files up to 8 MB and are removed from memory when the application stops.
+
+## Webots mode
+
+See the root README for the Webots startup command and uplink flow. Webots identifies the edge controller as a simulated NVIDIA Jetson Nano with a 4 GB, 10 W profile. YOLO11n still executes on the Windows laptop CPU, so measured latency is laptop latency. The application server continues to handle annotation, alerts, SQLite, and conditional YOLO11m inference.

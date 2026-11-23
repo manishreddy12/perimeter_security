@@ -1,0 +1,79 @@
+#VRML_SIM R2025a utf8
+WorldInfo { basicTimeStep 32 }
+Viewpoint {
+  orientation 1 0 0 -0.4
+  position 0.8 2.8 7
+}
+Background { skyColor [ 0.45 0.62 0.77 ] }
+DirectionalLight { direction -1 -1 -1 }
+Robot {
+  name "Object labels"
+  controller "scene_labels"
+  supervisor TRUE
+}
+Solid {
+  translation 0 -0.2 0
+  name "Ground"
+  children [
+    Shape {
+      appearance PBRAppearance { baseColor 0.3 0.34 0.32 roughness 1 }
+      geometry Box { size 12 0.1 12 }
+    }
+  ]
+  boundingObject Box { size 12 0.1 12 }
+}
+Robot {
+  translation 0 0 1
+  name "Jetson Nano edge (simulated)"
+  controller "perimeter_edge"
+  children [
+    Shape {
+      appearance PBRAppearance { baseColor 0.08 0.42 0.18 roughness 0.65 }
+      geometry Box { size 0.7 0.45 0.08 }
+    }
+    Camera {
+      translation 0.4 0 0
+      name "camera"
+      width 640
+      height 480
+    }
+    GPS { name "position" }
+    Emitter { name "uplink" channel 40 range 100 }
+  ]
+}
+Robot {
+  translation -1.2 0.05 1
+  name "Vibration edge (simulated)"
+  controller "vibration_edge"
+  locked TRUE
+  children [
+    Shape {
+      appearance PBRAppearance { baseColor 0.86 0.45 0.08 roughness 0.65 }
+      geometry Box { size 0.6 0.4 0.18 }
+    }
+    Emitter { name "uplink" channel 41 }
+  ]
+}
+Robot {
+  translation 2 0 0
+  name "Gateway"
+  controller "perimeter_gateway"
+  children [
+    Receiver { name "uplink" channel 40 bufferSize 65535 }
+    Receiver { name "vibration_uplink" channel 41 bufferSize 65535 }
+    Shape {
+      appearance PBRAppearance { baseColor 0.15 0.35 0.65 roughness 1 }
+      geometry Box { size 0.3 0.6 0.3 }
+    }
+  ]
+}
+Solid {
+  translation 3 0 1
+  name "Camera target"
+  children [
+    Shape {
+      appearance PBRAppearance { baseColor 0.7 0.3 0.13 roughness 1 }
+      geometry Box { size 1 1.5 0.6 }
+    }
+  ]
+}

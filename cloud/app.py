@@ -36,6 +36,8 @@ from config import (
     SECURITY_CLASSES,
     STATUS_TOPIC,
     VEHICLE_CLASSES,
+    VIBRATION_EDGE_ID,
+    WEBOTS_MODE,
     sensor_topic,
     status_topic,
 )
@@ -84,7 +86,32 @@ def create_events_table(connection: sqlite3.Connection) -> None:
                 edge_latency_ms REAL NOT NULL,
                 cloud_latency_ms REAL NOT NULL,
                 alert INTEGER NOT NULL,
+                sensor_readings TEXT NOT NULL DEFAULT '{}',
                 annotated_image TEXT NOT NULL
+            )
+        """
+    )
+
+
+def create_vibration_events_table(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS vibration_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id TEXT NOT NULL UNIQUE,
+                received_at TEXT NOT NULL,
+                edge_id TEXT NOT NULL,
+                classification TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                rms_g REAL NOT NULL,
+                peak_g REAL NOT NULL,
+                latency_ms REAL NOT NULL,
+                model TEXT NOT NULL,
+                model_parameters INTEGER NOT NULL,
+                sample_rate_hz REAL NOT NULL,
+                window_samples INTEGER NOT NULL,
+                resource_profile TEXT NOT NULL,
+                alert INTEGER NOT NULL
             )
         """
     )
@@ -92,6 +119,7 @@ def create_events_table(connection: sqlite3.Connection) -> None:
 
 def initialize_database() -> None:
     with connect_db() as connection:
+        create_vibration_events_table(connection)
         columns = {
             str(row["name"]) for row in connection.execute("PRAGMA table_info(events)").fetchall()
         }
@@ -117,6 +145,8 @@ def initialize_database() -> None:
             connection.execute("DROP TABLE events_legacy")
         else:
             create_events_table(connection)
+            if columns and "sensor_readings" not in columns:
+                connection.execute("ALTER TABLE events ADD COLUMN sensor_readings TEXT NOT NULL DEFAULT '{}'")
         # Browser uploads are intentionally in memory and disappear on restart.
         connection.execute("DELETE FROM events WHERE image_source='upload'")
 
@@ -141,6 +171,50 @@ def recent_events(limit: int = 20) -> list[dict[str, Any]]:
         event = dict(row)
         event["edge_detections"] = json.loads(event["edge_detections"])
         event["final_detections"] = json.loads(event["final_detections"])
+        event["sensor_readings"] = json.loads(event["sensor_readings"])
+        event["alert"] = bool(event["alert"])
+        events.append(event)
+    return events
+
+
+def insert_vibration_event(payload: dict[str, Any]) -> dict[str, Any]:
+    classification = str(payload["classification"])
+    record = {
+        "event_id": str(payload["event_id"]),
+        "received_at": now_iso(),
+        "edge_id": str(payload["edge_id"]),
+        "classification": classification,
+        "confidence": float(payload["confidence"]),
+        "rms_g": float(payload["rms_g"]),
+        "peak_g": float(payload["peak_g"]),
+        "latency_ms": float(payload["latency_ms"]),
+        "model": str(payload["model"]),
+        "model_parameters": int(payload["model_parameters"]),
+        "sample_rate_hz": float(payload["sample_rate_hz"]),
+        "window_samples": int(payload["window_samples"]),
+        "resource_profile": json.dumps(payload["resource_profile"]),
+        "alert": int(classification == "vibration_anomaly"),
+    }
+    columns = list(record)
+    with connect_db() as connection:
+        connection.execute(
+            f"INSERT OR REPLACE INTO vibration_events ({', '.join(columns)}) "
+            f"VALUES ({', '.join('?' for _ in columns)})",
+            [record[name] for name in columns],
+        )
+    return {**record, "resource_profile": payload["resource_profile"], "alert": bool(record["alert"])}
+
+
+def recent_vibration_events(limit: int = 20) -> list[dict[str, Any]]:
+    with connect_db() as connection:
+        rows = connection.execute(
+            "SELECT * FROM vibration_events ORDER BY id DESC LIMIT ?",
+            (max(1, min(limit, 50)),),
+        ).fetchall()
+    events = []
+    for row in rows:
+        event = dict(row)
+        event["resource_profile"] = json.loads(event["resource_profile"])
         event["alert"] = bool(event["alert"])
         events.append(event)
     return events
@@ -233,6 +307,7 @@ def process_edge_result(payload: dict[str, Any]) -> dict[str, Any]:
         "image_name": str(camera_event["image_name"]),
         "image_url": str(camera_event["image_url"]),
         "image_source": str(camera_event.get("source", "camera")),
+        "sensor_readings": json.dumps(camera_event.get("sensor_readings", {})),
         "edge_summary": str(edge_result["summary"]),
         "edge_detections": json.dumps(edge_detections),
         "final_summary": final_summary,
@@ -284,6 +359,22 @@ def on_mqtt_message(client, userdata, message) -> None:
                 component_status[message.topic.split("/")[2]] = payload
             return
         event_id = str(payload.get("event_id", ""))
+        if payload.get("event_type") == "vibration":
+            with connect_db() as connection:
+                exists = connection.execute(
+                    "SELECT 1 FROM vibration_events WHERE event_id=?", (event_id,)
+                ).fetchone()
+            if exists:
+                return
+            result = insert_vibration_event(payload)
+            if result["alert"]:
+                client.publish(ALERT_TOPIC, json.dumps(result), qos=MQTT_QOS)
+            print(
+                f"[cloud] vibration {event_id[:8]} -> {result['classification']} "
+                f"({result['confidence']:.0%})",
+                flush=True,
+            )
+            return
         with connect_db() as connection:
             if connection.execute("SELECT 1 FROM events WHERE event_id=?", (event_id,)).fetchone():
                 return
@@ -349,10 +440,16 @@ def health():
 def status():
     with status_lock:
         edge = component_status.get(EDGE_ID, {"status": "unreachable", "model": "YOLO11n"})
+        vibration_edge = component_status.get(
+            VIBRATION_EDGE_ID,
+            {"status": "unreachable", "model": "Tiny 1D CNN"},
+        )
     return jsonify(
         {
             "mqtt_broker": {"status": "ok" if broker_connected.is_set() else "unreachable"},
             "edge": edge,
+            "vibration_edge": vibration_edge,
+            "webots_mode": WEBOTS_MODE,
             "cloud": cloud_status("online"),
         }
     )
@@ -373,6 +470,15 @@ def events():
     except ValueError:
         limit = 12
     return jsonify({"events": recent_events(limit)})
+
+
+@app.get("/api/vibration-events")
+def vibration_events():
+    try:
+        limit = int(request.args.get("limit", "12"))
+    except ValueError:
+        limit = 12
+    return jsonify({"events": recent_vibration_events(limit)})
 
 
 @app.post("/api/run")
@@ -402,6 +508,15 @@ def run_image():
 
 @app.post("/api/upload")
 def upload_image():
+    return store_image("browser-upload")
+
+
+@app.post("/api/webots/capture")
+def webots_capture():
+    return store_image("webots-camera")
+
+
+def store_image(camera_id: str):
     if mqtt_client is None or not broker_connected.is_set():
         return jsonify({"error": "MQTT broker is unavailable"}), 503
     uploaded = request.files.get("image")
@@ -439,14 +554,16 @@ def upload_image():
     camera_event = {
         "event_id": str(uuid.uuid4()),
         "timestamp": now_iso(),
-        "camera_id": "browser-upload",
+        "camera_id": camera_id,
         "zone": "north-gate",
         "image_name": display_name,
         "image_url": request.host_url.rstrip("/") + relative_url,
         "source": "upload",
     }
+    if camera_id == "webots-camera":
+        return jsonify(camera_event), 201
     info = mqtt_client.publish(
-        sensor_topic("browser-upload"), json.dumps(camera_event), qos=MQTT_QOS
+        sensor_topic(camera_id), json.dumps(camera_event), qos=MQTT_QOS
     )
     if info.rc != mqtt.MQTT_ERR_SUCCESS:
         with upload_lock:
@@ -465,6 +582,7 @@ def upload_image():
 def reset():
     with connect_db() as connection:
         connection.execute("DELETE FROM events")
+        connection.execute("DELETE FROM vibration_events")
     with upload_lock:
         uploaded_images.clear()
     return jsonify({"status": "cleared"})

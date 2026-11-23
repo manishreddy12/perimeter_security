@@ -3,3 +3,6 @@ __pycache__/
 .venv/
 myenv/
 perimeter_events.db*
+.runtime/
+*.log
+*.wbproj
