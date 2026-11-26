@@ -59,7 +59,7 @@ Press `C` in the focused Edge-1 camera view. A typical edge-accepted event produ
 [lorawan-rx][edge-1] zone=north-gate event=<event> fragments=<count> object=normal boxes=0 decision=edge
 [network] event=<event> -> MQTT perimeter/edge/simulated-edge-01/result
 127.0.0.1 - - [...] "GET /uploads/<upload-id> HTTP/1.1" 200 -
-[cloud] <event-prefix> -> edge -> normal
+[cloud] <event-prefix> zone=north-gate -> edge -> normal
 ```
 
 Interpretation:
@@ -84,7 +84,7 @@ Expected pattern:
 [lorawan-rx][edge-1] zone=north-gate event=<event> fragments=<count> object=person boxes=<count> decision=cloud
 [network] event=<event> -> MQTT perimeter/edge/simulated-edge-01/result
 127.0.0.1 - - [...] "GET /static/demo_person.jpg HTTP/1.1" 200 -
-[cloud] <event-prefix> -> cloud -> person ALERT
+[cloud] <event-prefix> zone=north-gate -> cloud -> person ALERT
 ```
 
 Interpretation:
@@ -110,7 +110,7 @@ Typical output:
 [gateway][edge-2] forwarded=1 devaddr=DA1B0226 fcnt=<counter> frame=<bytes>B -> UDP:16803
 [lorawan-rx][edge-2] zone=north-gate event=<event> fragments=1 anomaly=YES confidence=100.0% rms=<value>g
 [network] event=<event> -> MQTT perimeter/edge/vibration-edge-01/result
-[cloud] vibration <event-prefix> -> vibration_anomaly (100%)
+[cloud] vibration <event-prefix> zone=north-gate -> vibration_anomaly (100%)
 ```
 
 Interpretation:

@@ -7,7 +7,7 @@ Use this file when you need to demonstrate the complete application without help
 Use the Git repository folder. On this machine it is:
 
 ```powershell
-cd D:\IIITB\Sems\20CrdProject\Perimeter_Sec\perimeter_security_demo
+cd D:\IIITB\Sems\20CrdProject\Perimeter_Sec\perimeter_security-main
 ```
 
 If you clone the repository on another computer, change to that clone's folder and create a fresh virtual environment there. Virtual environments are machine-specific and are intentionally excluded from Git.
@@ -66,7 +66,7 @@ node --check cloud\static\app.js
 
 Expected results:
 
-- 14 Python tests pass;
+- 15 Python tests pass;
 - `pip check` prints `No broken requirements found`;
 - the Node command produces no output when the JavaScript syntax is valid.
 
@@ -145,7 +145,7 @@ Expected terminal sequence:
 [gateway][edge-1] forwarded=... -> UDP:16803
 [lorawan-rx][edge-1] zone=north-gate ... fragments=<count>
 [network] event=<event-id> -> MQTT perimeter/edge/simulated-edge-01/result
-[cloud] <event-id> -> edge -> normal
+[cloud] <event-id> zone=north-gate -> edge -> normal
 ```
 
 ### Step 3: demonstrate a person or vehicle offload
@@ -186,7 +186,7 @@ Expected terminal sequence:
 [gateway][edge-2] forwarded=1 ... -> UDP:16803
 [lorawan-rx][edge-2] zone=north-gate ... fragments=1 anomaly=YES
 [network] event=<event-id> -> MQTT perimeter/edge/vibration-edge-01/result
-[cloud] vibration <event-id> -> vibration_anomaly (...%)
+[cloud] vibration <event-id> zone=north-gate -> vibration_anomaly (...%)
 ```
 
 The event should appear in the dashboard's **Vibration sensor events** table with `north-gate`, classification, confidence, RMS, peak, and edge latency.

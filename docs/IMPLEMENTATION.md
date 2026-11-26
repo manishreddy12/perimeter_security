@@ -403,12 +403,14 @@ The development API has no user authentication, CSRF protection, rate limiting, 
 
 `cloud.app` creates `perimeter_events.db` in the repository root.
 
+`connect_db()` wraps every operation in a transaction context and closes the SQLite connection in a `finally` block. This keeps the long-running Flask/MQTT process from accumulating database handles.
+
 ### 14.1 `events`
 
 Stored fields include:
 
 - unique event ID and receive time;
-- image name, URL, and source;
+- shared zone plus image name, URL, and source;
 - edge summary and JSON detections;
 - final summary and JSON detections;
 - execution location and decision reason;
@@ -417,11 +419,11 @@ Stored fields include:
 - JSON sensor readings;
 - Base64 annotated JPEG.
 
-At initialization, code migrates an older table containing `expected_label` into the current answer-free schema if encountered. It also adds `sensor_readings` to an older compatible table when necessary.
+At initialization, code migrates an older table containing `expected_label` into the current answer-free schema if encountered. It also adds `sensor_readings` and the default `north-gate` zone to older compatible tables when necessary.
 
 ### 14.2 `vibration_events`
 
-Stored fields include event/edge IDs, receive time, class, confidence, RMS, peak, latency, model name, parameter count, rate, window size, JSON resource profile, and alert flag.
+Stored fields include event/edge IDs, receive time, shared zone, class, confidence, RMS, peak, latency, model name, parameter count, rate, window size, JSON resource profile, and alert flag.
 
 ### 14.3 Durability rules
 
@@ -480,7 +482,7 @@ Run:
 node --check cloud\static\app.js
 ```
 
-The 14 Python tests verify:
+The 15 Python tests verify:
 
 - YOLO checkpoint and sample-image presence;
 - separate Edge-1 and Edge-2 Webots world assignments;
@@ -488,6 +490,7 @@ The 14 Python tests verify:
 - security summary and offloading behavior;
 - topic helpers;
 - explicit simulated Jetson/profile metadata;
+- the shared zone column in both cloud event tables;
 - vibration checkpoint shape and sub-1,000 parameter size;
 - independent camera/vibration addresses and keys;
 - multi-frame JSON round trip;
@@ -495,7 +498,7 @@ The 14 Python tests verify:
 - compact single-frame vibration payload;
 - tamper rejection, missing-fragment behavior, and replay rejection.
 
-The unit tests do not execute a full YOLO prediction, launch services, open Webots, measure accuracy, or validate physical performance. An end-to-end Webots check should confirm `[edge]`, `[vibration-edge]`, `[network]`, and `[cloud]` messages and dashboard records.
+The unit tests do not execute a full YOLO prediction, launch services, open Webots, measure accuracy, or validate physical performance. An end-to-end Webots check should confirm `[edge]`, `[vibration-edge]`, `[lorawan-tx]`, `[lorawan-payload]`, `[gateway]`, `[lorawan-rx]`, `[network]`, and `[cloud]` messages and dashboard records.
 
 ## 18. Current limitations
 

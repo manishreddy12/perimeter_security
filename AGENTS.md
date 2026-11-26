@@ -280,7 +280,7 @@ Built-in sample records can survive restarts. In-memory browser/Webots images do
 - `config.py`: ports, topics, model paths, sample list, class sets, IDs, and simulated resource profiles
 - `broker/app.py`: embedded MQTT 3.1.1 broker
 - `edge/app.py`: YOLO11n inference, summaries, decision rule, and MQTT edge service
-- `cloud/app.py`: Flask API, YOLO11m, MQTT handler, annotation, alerts, and SQLite
+- `cloud/app.py`: Flask API, YOLO11m, MQTT handler, annotation, alerts, shared-zone persistence, and SQLite connection lifecycle
 - `gateway/radio.py`: frame encryption, MIC, counters, fragmentation, and reassembly
 - `gateway/network_server.py`: UDP decoding and MQTT publication
 - `vibration/model.py`: tiny 1D CNN architecture
@@ -319,7 +319,7 @@ Run from this repository root:
 node --check cloud\static\app.js
 ```
 
-The current suite has 14 Python tests. They cover model assets, separate Edge-1/Edge-2 worlds, sample images, answer-free input events, summaries, offloading, topic helpers, simulated profiles, the vibration checkpoint, independent radio devices/keys, the compact vibration payload, fragmentation, tampering, and replay rejection.
+The current suite has 15 Python tests. They cover model assets, separate Edge-1/Edge-2 worlds, shared-zone cloud schemas, sample images, answer-free input events, summaries, offloading, topic helpers, simulated profiles, the vibration checkpoint, independent radio devices/keys, the compact vibration payload, fragmentation, tampering, and replay rejection.
 
 For a dashboard or service change, also perform an end-to-end run when feasible. In Webots mode, expect inference logs from `[edge]` and `[vibration-edge]`, transport logs from `[lorawan-tx]`, `[lorawan-payload]`, `[gateway]`, `[lorawan-rx]`, and `[network]`, then application results from `[cloud]`.
 

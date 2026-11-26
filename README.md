@@ -24,7 +24,7 @@ cd D:\IIITB\Sems\20CrdProject\Perimeter_Sec\perimeter_security-main
 
 Wait until the terminal prints `RGB object-detection demo is running`, then open http://127.0.0.1:8000. Keep the terminal open while presenting the demo. Press `Ctrl+C` in that terminal to stop the broker, edge service, and cloud service.
 
-Choose one of the nine neutral sample images, or drag and drop your own JPG, PNG, or WebP image. The page displays the original image, bounding boxes, edge result, final result, execution location, latency, and application logs. No preset class or user-provided object tag is sent to the models.
+Choose one of the nine neutral sample images, or drag and drop your own JPG, PNG, or WebP image. The page displays the shared zone, original image, bounding boxes, edge result, final result, execution location, latency, and application logs. No preset class or user-provided object tag is sent to the models.
 
 ## Models
 

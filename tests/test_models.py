@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import io
 import json
+import sqlite3
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 import paho.mqtt.client as mqtt
 import torch
@@ -15,6 +19,7 @@ from config import (
     EDGE_MODEL_PATH,
     JETSON_NANO_PROFILE,
     PERIMETER_ZONE,
+    VIBRATION_EDGE_ID,
     VIBRATION_EDGE_PROFILE,
     VIBRATION_MODEL_PATH,
     edge_topic,
@@ -63,6 +68,42 @@ class DemoTests(unittest.TestCase):
         finally:
             cloud_app.mqtt_client = None
             cloud_app.broker_connected.clear()
+
+    def test_cloud_schema_stores_zone_for_both_edge_types(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            database = Path(temporary_directory) / "events.db"
+            with patch.object(cloud_app, "DATABASE_PATH", database):
+                cloud_app.initialize_database()
+                stored_vibration = cloud_app.insert_vibration_event(
+                    {
+                        "event_id": "vibration-zone-test",
+                        "edge_id": VIBRATION_EDGE_ID,
+                        "classification": "normal",
+                        "confidence": 0.9,
+                        "rms_g": 0.01,
+                        "peak_g": 0.02,
+                        "latency_ms": 0.5,
+                        "model": "Tiny 1D CNN",
+                        "model_parameters": 482,
+                        "sample_rate_hz": 31.25,
+                        "window_samples": 64,
+                        "resource_profile": VIBRATION_EDGE_PROFILE,
+                    }
+                )
+                connection = sqlite3.connect(database)
+                try:
+                    camera_columns = {
+                        row[1] for row in connection.execute("PRAGMA table_info(events)")
+                    }
+                    vibration_columns = {
+                        row[1]
+                        for row in connection.execute("PRAGMA table_info(vibration_events)")
+                    }
+                finally:
+                    connection.close()
+            self.assertIn("zone", camera_columns)
+            self.assertIn("zone", vibration_columns)
+            self.assertEqual(stored_vibration["zone"], PERIMETER_ZONE)
 
     def test_image_upload_publishes_without_answer_tag(self) -> None:
         fake = FakeMqttClient()

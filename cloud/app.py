@@ -7,6 +7,8 @@ import threading
 import time
 import uuid
 from collections import OrderedDict
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any
 
@@ -61,10 +63,15 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def connect_db() -> sqlite3.Connection:
+@contextmanager
+def connect_db() -> Iterator[sqlite3.Connection]:
     connection = sqlite3.connect(DATABASE_PATH, timeout=10)
     connection.row_factory = sqlite3.Row
-    return connection
+    try:
+        with connection:
+            yield connection
+    finally:
+        connection.close()
 
 
 def create_events_table(connection: sqlite3.Connection) -> None:
@@ -77,6 +84,7 @@ def create_events_table(connection: sqlite3.Connection) -> None:
                 image_name TEXT NOT NULL,
                 image_url TEXT NOT NULL,
                 image_source TEXT NOT NULL,
+                zone TEXT NOT NULL DEFAULT 'north-gate',
                 edge_summary TEXT NOT NULL,
                 edge_detections TEXT NOT NULL,
                 final_summary TEXT NOT NULL,
@@ -157,6 +165,11 @@ def initialize_database() -> None:
             create_events_table(connection)
             if columns and "sensor_readings" not in columns:
                 connection.execute("ALTER TABLE events ADD COLUMN sensor_readings TEXT NOT NULL DEFAULT '{}'")
+            if columns and "zone" not in columns:
+                connection.execute(
+                    "ALTER TABLE events ADD COLUMN zone TEXT NOT NULL "
+                    f"DEFAULT '{PERIMETER_ZONE}'"
+                )
         # Browser uploads are intentionally in memory and disappear on restart.
         connection.execute("DELETE FROM events WHERE image_source='upload'")
 
@@ -318,6 +331,7 @@ def process_edge_result(payload: dict[str, Any]) -> dict[str, Any]:
         "image_name": str(camera_event["image_name"]),
         "image_url": str(camera_event["image_url"]),
         "image_source": str(camera_event.get("source", "camera")),
+        "zone": str(camera_event.get("zone", PERIMETER_ZONE)),
         "sensor_readings": json.dumps(camera_event.get("sensor_readings", {})),
         "edge_summary": str(edge_result["summary"]),
         "edge_detections": json.dumps(edge_detections),
@@ -333,6 +347,7 @@ def process_edge_result(payload: dict[str, Any]) -> dict[str, Any]:
     insert_event(record)
     return {
         "event_id": record["event_id"],
+        "zone": record["zone"],
         "final_summary": final_summary,
         "execution_location": selected,
         "alert": alert,
@@ -381,7 +396,8 @@ def on_mqtt_message(client, userdata, message) -> None:
             if result["alert"]:
                 client.publish(ALERT_TOPIC, json.dumps(result), qos=MQTT_QOS)
             print(
-                f"[cloud] vibration {event_id[:8]} -> {result['classification']} "
+                f"[cloud] vibration {event_id[:8]} zone={result['zone']} "
+                f"-> {result['classification']} "
                 f"({result['confidence']:.0%})",
                 flush=True,
             )
@@ -394,7 +410,8 @@ def on_mqtt_message(client, userdata, message) -> None:
         if result["alert"]:
             client.publish(ALERT_TOPIC, json.dumps(result), qos=MQTT_QOS)
         print(
-            f"[cloud] {event_id[:8]} -> {result['execution_location']} -> "
+            f"[cloud] {event_id[:8]} zone={result['zone']} "
+            f"-> {result['execution_location']} -> "
             f"{result['final_summary']}{' ALERT' if result['alert'] else ''}",
             flush=True,
         )

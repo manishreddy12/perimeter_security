@@ -111,7 +111,7 @@ A Webots capture typically shows:
 [lorawan-rx][edge-1] zone=north-gate event=<event> fragments=<count> object=normal boxes=0 decision=edge
 [network] event=<event> -> MQTT perimeter/edge/simulated-edge-01/result
 127.0.0.1 - - [...] "GET /uploads/<upload-id> HTTP/1.1" 200 -
-[cloud] <event-prefix> -> edge -> normal
+[cloud] <event-prefix> zone=north-gate -> edge -> normal
 ```
 
 How to read it:

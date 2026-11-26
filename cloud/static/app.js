@@ -116,7 +116,7 @@ function showLatest(event) {
 
 function renderEvents(events) {
   if (!events.length) {
-    byId("events").innerHTML = '<tr><td colspan="6" class="empty">No detections yet.</td></tr>';
+    byId("events").innerHTML = '<tr><td colspan="7" class="empty">No detections yet.</td></tr>';
     byId("logs").textContent = "Waiting for an RGB image event...";
     byId("latest").classList.add("hidden");
     return;
@@ -125,6 +125,7 @@ function renderEvents(events) {
   byId("events").innerHTML = events.map(event => `
     <tr>
       <td>${new Date(event.received_at).toLocaleTimeString()}</td>
+      <td>${escapeHtml(event.zone || "north-gate")}</td>
       <td>${escapeHtml(event.image_name)}</td>
       <td>${escapeHtml(event.edge_summary)}</td>
       <td><span class="result ${event.alert ? "danger" : ""}">${escapeHtml(event.final_summary)}</span></td>
@@ -133,7 +134,7 @@ function renderEvents(events) {
     </tr>`).join("");
   byId("logs").textContent = events.slice().reverse().map(event => {
     const time = new Date(event.received_at).toLocaleTimeString();
-    return `[${time}] ${event.image_name} | edge=${event.edge_summary} | ${event.execution_location}=${event.final_summary}${event.alert ? " | ALERT" : ""}`;
+    return `[${time}] ${event.zone || "north-gate"} | ${event.image_name} | edge=${event.edge_summary} | ${event.execution_location}=${event.final_summary}${event.alert ? " | ALERT" : ""}`;
   }).join("\n");
   byId("logs").scrollTop = byId("logs").scrollHeight;
 }

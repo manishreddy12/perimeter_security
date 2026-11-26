@@ -292,7 +292,7 @@ From the repository root:
 node --check cloud\static\app.js
 ```
 
-The current Python suite contains 14 tests covering required assets, the separate edge worlds, neutral inputs, summaries and offloading, profiles, the vibration checkpoint, separate radio devices/keys, payload size, fragmentation, tampering, and replay rejection.
+The current Python suite contains 15 tests covering required assets, the separate edge worlds, shared-zone cloud schemas, neutral inputs, summaries and offloading, profiles, the vibration checkpoint, separate radio devices/keys, payload size, fragmentation, tampering, and replay rejection.
 
 ## Troubleshooting
 
