@@ -2,7 +2,7 @@
 
 This project demonstrates camera and vibration inference across two simulated edge devices and a laptop application server.
 
-For a code-grounded description of the running components, communication paths, models, APIs, storage, and limitations, see [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md).
+For setup and presentation, start with [docs/README.md](docs/README.md) or the concise [docs/DEMO_RUNBOOK.md](docs/DEMO_RUNBOOK.md). For a code-grounded description of the running components, communication paths, models, APIs, storage, and limitations, see [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md). The documentation index also links dedicated architecture, log-evidence, image-transfer, sensor-correlation, and vibration-training guides.
 
 ```text
 RGB demo image
@@ -18,7 +18,7 @@ RGB demo image
 Open PowerShell and run:
 
 ```powershell
-cd D:\IIITB\Sems\20CrdProject\Perimeter_Sec\perimeter_security_demo
+cd D:\IIITB\Sems\20CrdProject\Perimeter_Sec\perimeter_security-main
 .\myenv\Scripts\python.exe run_demo.py
 ```
 
@@ -73,7 +73,7 @@ Valid image names are `sample_01` through `sample_09`, plus `cycle`.
 ## First-time installation on another computer
 
 ```powershell
-cd <path-to-perimeter_security_demo>
+cd <path-to-perimeter_security-main>
 python -m venv myenv
 .\myenv\Scripts\python.exe -m pip install -r requirements.txt
 .\myenv\Scripts\python.exe run_demo.py
@@ -86,14 +86,14 @@ The local `yolo11n.pt` and `yolo11m.pt` files make this copy usable without down
 From this checkout's root, install [Webots R2025a for Windows](https://github.com/cyberbotics/webots/releases/tag/R2025a), then run:
 
 ```powershell
-py -3.12 -m venv myenv
+py -3.13 -m venv myenv
 .\myenv\Scripts\python.exe -m pip install -r requirements.txt
 .\myenv\Scripts\python.exe run_demo.py --webots
 ```
 
 Set `PERIMETER_WEBOTS_EXE` to the Webots executable if the launcher cannot find it.
-Webots starts a simulated NVIDIA Jetson Nano camera edge, a fixed low-power vibration edge, and a gateway. The vibration box has no physical dynamics, so it cannot slide or fall; its controller generates reproducible synthetic sensor samples for the 1D CNN. It captures an initial camera frame automatically. Focus the running 3D view and press **C** to capture another camera frame or **V** to inject vibration into the current sensor window.
-The Webots 3D view includes a fixed on-screen legend identifying the green camera edge, orange vibration edge, blue gateway, and brown camera target.
+Webots opens two separate scenes: Edge-1 is a simulated NVIDIA Jetson Nano camera edge with YOLO11n, and Edge-2 is a fixed simple vibration device with a tiny 1D CNN. Both worlds reproduce the same `north-gate` fence geometry and coordinates: the camera faces the fence and the vibration device is mounted at the corresponding marked location. Reference markers show the other edge's position in each view. They are two synchronized-layout digital-twin views, not a shared Webots physics process or correlated incident detector. Each scene also shows a gateway relay; both relays feed the same local network server and application path. The vibration box has no physical dynamics, so its controller generates reproducible synthetic samples. The camera world captures an initial frame automatically. Focus the Edge-1 view and press **C** to capture another image; focus the Edge-2 view and press **V** to inject vibration into the current sensor window.
+Each Webots view includes a world-specific on-screen legend and keyboard instruction.
 The dashboard at http://127.0.0.1:8000 also accepts the existing samples and uploads for testing with real photographs.
 The simple 3D scene can yield a normal result.
 
@@ -101,7 +101,8 @@ YOLO11n runs inside the simulated Jetson Nano camera controller. Computation sti
 Both edge devices use distinct addresses and session keys. Their results travel through Webots' simulated radio as encrypted LoRaWAN 1.0 unconfirmed uplink frames.
 The gateway relays the frames over UDP port 16803 to the local Python network server.
 The network server verifies the MIC and frame counter, reassembles the result, and publishes it over MQTT to the existing Flask application.
-Restart the launcher after resetting the Webots world to establish fresh session keys and counters.
+The terminal prints readable `[lorawan-tx]`, `[lorawan-payload]`, `[gateway]`, and `[lorawan-rx]` summaries so the payload size, fragment count, device address, decoded result, and MQTT handoff can be demonstrated without exposing session keys.
+Restart the launcher after resetting either Webots world to establish fresh session keys and counters.
 
 The vibration node uses a 512 MB, 2 W target profile and a 482-parameter 1D CNN. The camera node retains its 4 GB, 10 W Jetson Nano profile. These are simulated target requirements and do not reserve laptop RAM. The 1D CNN checkpoint is trained from reproducible synthetic normal and anomalous waveforms, so its synthetic training score is not field accuracy. Retrain it with `.\myenv\Scripts\python.exe -m vibration.train_model`.
 

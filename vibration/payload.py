@@ -4,7 +4,7 @@ import struct
 import uuid
 from datetime import datetime, timezone
 
-from config import VIBRATION_EDGE_ID, VIBRATION_EDGE_PROFILE
+from config import PERIMETER_ZONE, VIBRATION_EDGE_ID, VIBRATION_EDGE_PROFILE
 from vibration.model import CLASS_NAMES, SAMPLE_RATE_HZ, WINDOW_SIZE, TinyVibrationCNN, parameter_count
 
 
@@ -37,6 +37,7 @@ def decode_vibration_event(payload: bytes) -> dict[str, object]:
         "event_id": str(uuid.UUID(bytes=event_id)),
         "timestamp": datetime.fromtimestamp(timestamp, timezone.utc).isoformat(),
         "edge_id": VIBRATION_EDGE_ID,
+        "zone": PERIMETER_ZONE,
         "classification": CLASS_NAMES[class_index],
         "confidence": confidence / 10_000.0,
         "rms_g": rms / 10_000.0,

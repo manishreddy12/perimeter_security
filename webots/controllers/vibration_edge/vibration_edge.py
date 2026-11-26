@@ -22,6 +22,7 @@ from config import (
     MQTT_KEEPALIVE,
     MQTT_PORT,
     MQTT_QOS,
+    PERIMETER_ZONE,
     VIBRATION_EDGE_ID,
     VIBRATION_EDGE_PROFILE,
     VIBRATION_LORAWAN_DEVICE,
@@ -136,6 +137,7 @@ def main() -> None:
                 "event_id": str(uuid.uuid4()),
                 "timestamp": now_iso(),
                 "edge_id": VIBRATION_EDGE_ID,
+                "zone": PERIMETER_ZONE,
                 "classification": classification,
                 "confidence": round(float(probabilities[class_index]), 4),
                 "rms_g": round(float(np.sqrt(np.mean(signal ** 2))), 4),
@@ -147,7 +149,23 @@ def main() -> None:
                 "window_samples": WINDOW_SIZE,
                 "resource_profile": VIBRATION_EDGE_PROFILE,
             }
-            radio_frames.extend(encoder.encode_bytes(encode_vibration_event(event)))
+            application_payload = encode_vibration_event(event)
+            encoded_frames = list(encoder.encode_bytes(application_payload))
+            radio_frames.extend(encoded_frames)
+            print(
+                f"[lorawan-tx][edge-2] zone={PERIMETER_ZONE} "
+                f"devaddr={VIBRATION_LORAWAN_DEVICE.upper()} "
+                f"event={event['event_id'][:8]} payload={len(application_payload)}B "
+                f"fragments={len(encoded_frames)}",
+                flush=True,
+            )
+            print(
+                f"[lorawan-payload][edge-2] anomaly="
+                f"{'YES' if classification == 'vibration_anomaly' else 'NO'} "
+                f"confidence={event['confidence']:.1%} rms={event['rms_g']:.4f}g "
+                f"peak={event['peak_g']:.4f}g compact_hex={application_payload.hex().upper()}",
+                flush=True,
+            )
             processed += 1
             client.publish(
                 status_topic(VIBRATION_EDGE_ID),

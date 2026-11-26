@@ -26,6 +26,10 @@ from config import (
 
 ROOT = Path(__file__).resolve().parent
 ULTRALYTICS_CONFIG_DIR = ROOT / ".runtime" / "ultralytics"
+WEBOTS_WORLDS = (
+    ROOT / "webots" / "worlds" / "edge1_camera_jetson.wbt",
+    ROOT / "webots" / "worlds" / "edge2_vibration_device.wbt",
+)
 
 
 def start(module: str) -> subprocess.Popen[bytes]:
@@ -75,18 +79,21 @@ def webots_executable() -> Path:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--webots", action="store_true", help="Run the edge and gateway in Webots")
+    parser.add_argument(
+        "--webots",
+        action="store_true",
+        help="Run the camera and vibration edge worlds with gateway relays in Webots",
+    )
     args = parser.parse_args()
     ULTRALYTICS_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("YOLO_CONFIG_DIR", str(ULTRALYTICS_CONFIG_DIR))
     simulator = webots_executable() if args.webots else None
-    os.environ["PERIMETER_WEBOTS_MODE"] = "1" if simulator else "0"
-    required_models = [EDGE_MODEL_PATH, CLOUD_MODEL_PATH]
+    required_files = [EDGE_MODEL_PATH, CLOUD_MODEL_PATH]
     if simulator:
-        required_models.append(VIBRATION_MODEL_PATH)
-    missing = [path.name for path in required_models if not path.exists()]
+        required_files.extend((VIBRATION_MODEL_PATH, *WEBOTS_WORLDS))
+    missing = [str(path.relative_to(ROOT)) for path in required_files if not path.exists()]
     if missing:
-        raise RuntimeError(f"Missing pretrained model weights: {', '.join(missing)}")
+        raise RuntimeError(f"Missing required demo files: {', '.join(missing)}")
 
     processes: list[subprocess.Popen[bytes]] = []
     try:
@@ -104,11 +111,20 @@ def main() -> None:
             processes.append(start("gateway.network_server"))
             environment = os.environ.copy()
             environment["PATH"] = str(Path(sys.executable).parent) + os.pathsep + environment["PATH"]
-            processes.append(subprocess.Popen(
-                [str(simulator), "--batch", "--stdout", "--stderr", "--mode=realtime", str(ROOT / "webots/worlds/perimeter.wbt")],
-                cwd=ROOT,
-                env=environment,
-            ))
+            for index, world in enumerate(WEBOTS_WORLDS):
+                processes.append(subprocess.Popen(
+                    [
+                        str(simulator),
+                        f"--port={1234 + index}",
+                        "--batch",
+                        "--stdout",
+                        "--stderr",
+                        "--mode=realtime",
+                        str(world),
+                    ],
+                    cwd=ROOT,
+                    env=environment,
+                ))
         else:
             processes.append(start("edge.app"))
         deadline = time.monotonic() + (150 if simulator else 30)
@@ -128,7 +144,8 @@ def main() -> None:
         edge_name = "simulated Jetson Nano in Webots" if simulator else "logical edge"
         print(f"Edge model:  YOLO11n ({edge_name}, executed on laptop CPU)")
         if simulator:
-            print("Sensor edge: Tiny 1D CNN (512 MB low-power profile, laptop CPU)")
+            print("Edge-1 world: Jetson Nano camera profile with YOLO11n")
+            print("Edge-2 world: Simple vibration device profile with Tiny 1D CNN")
         print("Cloud model: YOLO11m (laptop CPU)")
         print("Press Ctrl+C here to stop.\n")
 

@@ -1,61 +1,56 @@
-# Perimeter Security Implementation Document
+# Perimeter Security implementation reference
 
-## 1. Purpose and scope
+## 1. Purpose and repository boundary
 
-This document describes the implementation of the current RGB and vibration perimeter-security demonstration in this repository. It covers the code that runs today, the communication paths, the models, storage, APIs, startup process, and known limitations.
+This document describes the code in the final `perimeter_security-main` repository: its processes, inference stages, communication paths, storage, APIs, simulator integration, tests, and limitations.
 
-The application is a functional local demonstration. All neural-network inference currently executes on the Windows laptop CPU. Webots supplies a simulated world and simulated radio devices; it does not emulate Jetson CPU/GPU performance, LoRa RF propagation, energy consumption, or physical sensor accuracy.
+The implementation is a functional local demonstration. All neural-network inference executes on the Windows laptop CPU. Webots provides a 3D world, logical devices, and packet transport; it does not emulate NVIDIA Jetson execution, sensor physics, LoRa RF, target-device power, or deployment-site accuracy.
 
-The older synthetic 5×4 sensor-matrix application is a separate demonstration and is not described here.
+Older prototypes that may exist elsewhere in the parent workspace are not runtime dependencies and are outside this document.
 
-## 2. Implemented system overview
+## 2. Implemented system
 
-The application contains two logical edge devices:
+The final application has three ML roles:
 
-1. A camera edge with a simulated NVIDIA Jetson Nano resource profile and YOLO11n.
-2. A fixed low-power vibration edge with a 512 MB, 2 W profile and a tiny 1D CNN.
+| Role | Model | Execution condition | Actual host |
+| --- | --- | --- | --- |
+| RGB edge | YOLO11n, 416-pixel input | Every valid RGB event | Windows laptop CPU |
+| RGB cloud verification | YOLO11m, 640-pixel input | Only when the edge rule selects `cloud` | Windows laptop CPU |
+| Vibration edge | 482-parameter 1D CNN, 64 samples | Every Webots vibration window | Windows laptop CPU |
 
-The laptop also runs the application infrastructure:
+Supporting infrastructure includes:
 
-- an embedded MQTT broker;
-- the Flask API and dashboard;
-- a conditional YOLO11m cloud model;
-- an SQLite database;
-- and, in Webots mode, a simulated LoRaWAN network server.
+- an embedded MQTT 3.1.1 broker;
+- a Flask development server and browser dashboard;
+- an SQLite runtime database;
+- OpenCV image validation and annotation;
+- and, in Webots mode, simulated radio nodes, a UDP gateway backhaul, and a Python network server.
 
-```text
-Camera input
-  -> YOLO11n edge inference
-  -> edge/cloud decision
-  -> simulated LoRaWAN in Webots mode
-  -> gateway -> UDP network server -> MQTT
-  -> optional YOLO11m cloud inference
-  -> OpenCV annotation -> SQLite -> dashboard
+## 3. Execution modes and lifecycle
 
-Synthetic vibration window
-  -> tiny 1D CNN edge inference
-  -> compact simulated LoRaWAN uplink
-  -> gateway -> UDP network server -> MQTT
-  -> SQLite -> dashboard/alert
-```
+### 3.1 Default MQTT-only mode
 
-## 3. Execution modes
-
-### 3.1 Default MQTT mode
-
-Command:
+Command from the repository root:
 
 ```powershell
 .\myenv\Scripts\python.exe run_demo.py
 ```
 
-`run_demo.py` starts these Python processes:
+The launcher starts:
 
-1. `broker.app` — embedded MQTT broker.
-2. `cloud.app` — Flask application, YOLO11m, database, and MQTT consumer.
-3. `edge.app` — logical YOLO11n edge worker.
+1. `python -u -m broker.app`
+2. `python -u -m cloud.app`
+3. `python -u -m edge.app`
 
-Camera events and edge results both travel through MQTT. Webots, the vibration edge, simulated LoRaWAN, and the UDP network server are not started.
+Readiness is checked in this order:
+
+1. connect to the MQTT broker;
+2. call `GET /api/health`;
+3. poll `GET /api/status` until the RGB edge status is `online`.
+
+The default mode does not start Webots, `gateway.network_server`, the vibration controller, or UDP port 16803.
+
+The dashboard JavaScript currently considers the whole page online only when MQTT, RGB edge, and vibration edge are all online. Therefore, its combined banner can remain `WAITING FOR EDGE DEVICES` in default mode even though the launcher is ready and RGB inference is functional. This is a front-end status condition, not an inference dependency.
 
 ### 3.2 Webots mode
 
@@ -65,227 +60,419 @@ Command:
 .\myenv\Scripts\python.exe run_demo.py --webots
 ```
 
-The launcher starts:
+The launcher locates Webots from `PERIMETER_WEBOTS_EXE`, `PATH`, or the normal Windows installation directory and starts:
 
-1. `broker.app`;
-2. `cloud.app`;
-3. `gateway.network_server`;
-4. Webots with `webots/worlds/perimeter.wbt`.
+1. `broker.app`
+2. `cloud.app`
+3. `gateway.network_server`
+4. Webots in batch/realtime mode with `webots/worlds/edge1_camera_jetson.wbt`
+5. Webots in batch/realtime mode with `webots/worlds/edge2_vibration_device.wbt`
 
-Webots then starts four controllers:
+The R2025a worlds assign these controllers:
 
-| Controller | Responsibility |
+| World | Controller | World object | Responsibility |
+| --- | --- | --- | --- |
+| Edge-1 | `scene_labels` | Supervisor | Camera-world legend and `C` instruction |
+| Edge-1 | `camera_edge` | Green Jetson Nano profile | Camera capture, YOLO11n, camera-result uplink |
+| Edge-1 | `perimeter_gateway` | Blue gateway relay | Channel 40 reception and UDP forwarding |
+| Edge-2 | `scene_labels` | Supervisor | Vibration-world legend and `V` instruction |
+| Edge-2 | `vibration_edge` | Orange simple device | Synthetic samples, 1D CNN, vibration-result uplink |
+| Edge-2 | `perimeter_gateway` | Blue gateway relay | Channel 41 reception and UDP forwarding |
+
+The two visible relays represent one logical gateway path: both send received frames to the same UDP network server on port 16803.
+
+Both worlds reproduce the same `north-gate` scene coordinates: the brown fence is at `(3, 0, 1)`, the camera position is `(0, 0, 1)`, and the vibration sensor position is `(2.82, -0.75, 0.8)`. The world that does not execute a device shows a passive reference marker at its position. This aligns the sensor narratives spatially but does not synchronize the two Webots physics processes or correlate their events.
+
+The launcher assigns Webots controller ports 1234 and 1235 explicitly so both simulator instances can run together without automatic port fallback.
+
+Before those processes start, the launcher creates four random 16-byte session keys in environment variables:
+
+- `PERIMETER_NWK_SKEY`
+- `PERIMETER_APP_SKEY`
+- `PERIMETER_VIBRATION_NWK_SKEY`
+- `PERIMETER_VIBRATION_APP_SKEY`
+
+It waits up to 150 seconds for both RGB and vibration retained statuses. The Edge-1 camera controller performs one initial capture after its MQTT connection is established.
+
+### 3.3 Shutdown
+
+`Ctrl+C` in the launcher enters cleanup and ignores subsequent SIGINTs. On Windows, `taskkill /T /F` stops each launched process tree in reverse order. On other platforms, the launcher sends normal process termination and escalates to kill after a timeout.
+
+Before restarting after an abnormal exit, check for stale owners of TCP 1883, TCP 8000, and—when using Webots—UDP 16803.
+
+## 4. Configuration and assets
+
+`config.py` is the shared source for ports, topics, IDs, model paths, sample metadata, class groups, and simulated resource profiles.
+
+| Setting | Default |
 | --- | --- |
-| `scene_labels` | Draws the fixed color legend in the 3D view. |
-| `perimeter_edge` | Captures the camera, runs YOLO11n, and sends camera results by simulated LoRaWAN. |
-| `vibration_edge` | Generates synthetic vibration windows, runs the 1D CNN, and sends compact results by simulated LoRaWAN. |
-| `perimeter_gateway` | Receives Webots radio packets and relays them to UDP port 16803. |
+| MQTT | `127.0.0.1:1883` |
+| Flask | `127.0.0.1:8000` |
+| UDP backhaul | `127.0.0.1:16803` |
+| RGB edge ID | `simulated-edge-01` |
+| Vibration edge ID | `vibration-edge-01` |
+| Camera radio device | `da1b0126` |
+| Vibration radio device | `da1b0226` |
+| MQTT QoS | 1 |
 
-The launcher generates fresh camera and vibration ABP session keys for every run and passes them to the network server and Webots controllers through environment variables.
+Network settings can be overridden with `PERIMETER_MQTT_HOST`, `PERIMETER_MQTT_PORT`, `PERIMETER_CLOUD_HOST`, and `PERIMETER_CLOUD_PORT`.
 
-## 4. Process and port map
+Required assets are:
 
-| Component | Implementation | Address/port |
+- `yolo11n.pt`, approximately 5.6 MB;
+- `yolo11m.pt`, approximately 40.7 MB;
+- nine JPEGs configured in `DEMO_IMAGES`;
+- and `vibration/tiny_vibration_cnn.pt` for Webots mode.
+
+The launcher sets `YOLO_CONFIG_DIR` to `.runtime/ultralytics`.
+
+## 5. RGB input paths
+
+### 5.1 Built-in sample
+
+The browser calls:
+
+```http
+POST /api/run
+Content-Type: application/json
+
+{"image":"sample_03"}
+```
+
+The API validates the key, constructs a camera event, publishes it to `perimeter/camera/rgb-camera-01/image`, and returns HTTP 202 with an event ID. The nine configured samples have neutral titles and descriptions.
+
+Representative event:
+
+```json
+{
+  "event_id": "uuid",
+  "timestamp": "UTC ISO-8601",
+  "camera_id": "rgb-camera-01",
+  "zone": "north-gate",
+  "image_name": "Sample 03",
+  "image_url": "http://127.0.0.1:8000/static/demo_person.jpg",
+  "source": "sample"
+}
+```
+
+There is no `expected_label`, answer class, or user-entered object tag.
+
+### 5.2 Browser upload
+
+`POST /api/upload` reads at most 8 MB plus one sentinel byte, decodes with OpenCV, limits the longest side to 1600 pixels, and JPEG-encodes at quality 90. The UI advertises JPG, PNG, and WebP; the backend's actual validity test is whether OpenCV can decode the content.
+
+The converted bytes are stored in an in-memory `OrderedDict` under a random ID. The store retains at most 20 items and evicts the oldest. The camera event uses ID `browser-upload`, source `upload`, and `GET /uploads/<id>` as its image URL.
+
+Only the URL and metadata enter MQTT. Raw image bytes do not.
+
+### 5.3 Webots capture
+
+`POST /api/webots/capture` uses the same image preparation function with camera ID `webots-camera`, but it returns HTTP 201 with the camera event instead of publishing it to MQTT. The controller already owns the captured frame and calls `EdgeVisionModel.predict_frame()` locally.
+
+The controller adds `sensor_readings` containing:
+
+- Webots `GPS.getValues()` Cartesian position in metres;
+- descriptive device name;
+- simulated power-mode metadata;
+- simulated memory metadata.
+
+These values are scene/profile metadata, not real geographic GPS, power, or memory measurements.
+
+### 5.4 Mock camera
+
+`sensor/mock_sensor.py` builds the same kind of sample event and publishes directly to the configured camera topic. It does not call the Flask input routes.
+
+## 6. RGB edge inference
+
+`edge/app.py::EdgeVisionModel` loads `yolo11n.pt` through the Ultralytics `YOLO` class. Inference uses:
+
+```python
+model.predict(image, imgsz=416, conf=0.25, device="cpu", verbose=False)
+```
+
+Only these configured COCO groups are retained:
+
+- person: `person`
+- vehicle: `car`, `motorcycle`, `bus`, `truck`
+- animal: `bird`, `cat`, `dog`, `horse`, `sheep`, `cow`, `elephant`, `bear`, `zebra`, `giraffe`
+
+Each retained result has `class`, rounded `confidence`, and `[x1, y1, x2, y2]` coordinates. Summary priority is vehicle, person, animal, normal.
+
+`choose_location()` implements:
+
+| Edge result | Selected location | Reason category |
 | --- | --- | --- |
-| MQTT broker | Python `amqtt` broker | `127.0.0.1:1883` |
-| MQTT clients | Python `paho-mqtt` | Connect to port 1883 |
-| Flask dashboard/API | Flask development server | `127.0.0.1:8000` |
-| Gateway backhaul | UDP socket | `127.0.0.1:16803` |
-| Database | SQLite | `perimeter_events.db` |
+| Person | Cloud | Security-sensitive |
+| Vehicle | Cloud | Security-sensitive |
+| Retained detections and maximum confidence below 0.50 | Cloud | Low confidence |
+| Confident animal | Edge | Edge result sufficient |
+| No retained security object | Edge | Edge result sufficient |
 
-MQTT does not use Docker, Mosquitto, or an external cloud service. `broker/app.py` creates an MQTT 3.1.1 broker from the `amqtt` library. Anonymous connections are enabled for this localhost demonstration.
+The outgoing edge envelope contains the original camera event, YOLO11n result, decision, and edge runtime/profile status.
 
-The following environment variables override default network settings:
+In default mode, the service publishes that envelope directly to `perimeter/edge/simulated-edge-01/result`. In Webots mode, `publish_result` places it on a controller queue for simulated radio transmission.
 
-- `PERIMETER_MQTT_HOST`
-- `PERIMETER_MQTT_PORT`
-- `PERIMETER_CLOUD_HOST`
-- `PERIMETER_CLOUD_PORT`
-- `PERIMETER_WEBOTS_EXE`
+## 7. RGB cloud processing
 
-Ultralytics settings are stored under `.runtime/ultralytics` so the launcher does not depend on write access to the Windows roaming-profile directory.
+`cloud.app` loads `yolo11m.pt` at process startup. It subscribes to all edge-result and component-status topics.
 
-## 5. Camera inference implementation
+For a camera edge result:
 
-### 5.1 Input sources
+1. Duplicate `event_id` values already in SQLite are ignored.
+2. If `selected_location` is `cloud`, the service downloads the image and runs:
 
-The application accepts camera events from three sources:
+   ```python
+   cloud_model.predict(image, imgsz=640, conf=0.25, device="cpu", verbose=False)
+   ```
 
-- one of nine built-in sample images through `POST /api/run`;
-- a user image through `POST /api/upload`;
-- the Webots camera through `POST /api/webots/capture`.
+3. If `selected_location` is `edge`, YOLO11m is not called; the service downloads the image only for annotation.
+4. The chosen detections are summarized.
+5. OpenCV draws rectangles and confidence labels and adds the selected model name.
+6. The JPEG is encoded at quality 82 and stored as Base64.
+7. SQLite receives the record.
+8. A compact completion object is published to `perimeter/cloud/simulated-edge-01/result`.
+9. A final person or vehicle also publishes to `perimeter/alerts`.
 
-Uploads accept JPG, PNG, and WebP. The application reads at most 8 MB, decodes the image with OpenCV, limits the longest side to 1600 pixels, converts it to JPEG, and keeps at most 20 uploaded images in memory.
+An animal result is not currently an alert. The fixed `north-gate` string is event metadata; the code does not perform geometric zone or authorization analysis.
 
-MQTT carries image metadata and an HTTP URL, not raw JPEG bytes. Webots posts a captured JPEG to Flask so it can receive a temporary URL, but YOLO11n performs inference locally on the already captured frame.
+## 8. Complete RGB flows
 
-### 5.2 YOLO11n edge stage
-
-`edge/app.py` loads `yolo11n.pt` through the Ultralytics `YOLO` class and runs:
-
-- input size: 416 pixels;
-- confidence threshold: 0.25;
-- device: CPU.
-
-Only configured security classes are retained:
-
-- person;
-- car, motorcycle, bus, and truck;
-- common COCO animal classes.
-
-Each retained detection contains its class, confidence, and `[x1, y1, x2, y2]` bounding box. The summary priority is vehicle, person, animal, then normal.
-
-### 5.3 Offloading rule
-
-The current decision is a hand-written rule:
-
-| Edge result | Decision |
-| --- | --- |
-| Person | Run YOLO11m in the cloud service. |
-| Vehicle | Run YOLO11m in the cloud service. |
-| Any retained detection below 0.50 maximum confidence | Run YOLO11m in the cloud service. |
-| Confident animal | Accept YOLO11n. |
-| No configured security detection | Accept YOLO11n. |
-
-This is not an ML scheduler, SCI calculation, or carbon-aware offloading policy.
-
-### 5.4 YOLO11m cloud stage
-
-`cloud/app.py` loads `yolo11m.pt` at startup. It runs only when the edge selects `cloud`:
-
-- input size: 640 pixels;
-- confidence threshold: 0.25;
-- device: CPU.
-
-If the edge selects `edge`, YOLO11m is skipped and the YOLO11n detections become the final detections. OpenCV draws the selected model's bounding boxes and labels and stores the annotated JPEG as Base64 in SQLite.
-
-A final person or vehicle summary creates an alert. An animal result is not currently an alert.
-
-## 6. Vibration inference implementation
-
-The orange vibration box is fixed in the Webots world. It has no physical dynamics, so gravity and collision forces cannot move it. The controller generates reproducible synthetic samples using random seed 2026.
-
-The input configuration is:
-
-- 64 samples per window;
-- 31.25 Hz sample rate;
-- approximately 2.05 seconds per window;
-- normal baseline noise with standard deviation 0.01;
-- an injected 8 Hz sinusoid with amplitude 0.55 for demonstration anomalies.
-
-Pressing `V` in the focused Webots view injects an anomaly into the next/current window. Every fourth window also receives an automatic demonstration anomaly.
-
-The `TinyVibrationCNN` architecture is:
+### 8.1 Default mode
 
 ```text
-1 input channel
-  -> Conv1d(1, 8, kernel 5) -> ReLU -> MaxPool1d(2)
-  -> Conv1d(8, 16, kernel 3) -> ReLU
-  -> AdaptiveAvgPool1d(1)
-  -> Linear(16, 2)
-  -> normal or vibration_anomaly
+POST /api/run or /api/upload
+  -> HTTP 202 after MQTT publication
+  -> perimeter/camera/<camera-id>/image
+  -> broker forwards message
+  -> edge downloads image and runs YOLO11n
+  -> perimeter/edge/simulated-edge-01/result
+  -> cloud accepts edge output or runs YOLO11m
+  -> OpenCV + SQLite + optional alert
+  -> GET /api/events polling displays completion
 ```
 
-The model has 482 parameters and loads `vibration/tiny_vibration_cnn.pt`. It was trained on synthetic signals, so its result demonstrates the pipeline and must not be presented as field accuracy.
-
-## 7. Simulated LoRaWAN and gateway
-
-### 7.1 Radio path
-
-In Webots mode, camera and vibration inference results follow this path:
+### 8.2 Webots mode
 
 ```text
-Edge controller
-  -> Webots Emitter
-  -> Webots Receiver in the blue gateway
+Webots camera or browser/MQTT camera event
+  -> YOLO11n in Edge-1 camera_edge controller process
+  -> Webots Emitter channel 40
+  -> Webots gateway Receiver
   -> UDP 127.0.0.1:16803
-  -> gateway/network_server.py
-  -> MQTT perimeter/edge/<edge-id>/result
+  -> gateway.network_server decoder
+  -> perimeter/edge/simulated-edge-01/result
+  -> normal cloud processing
 ```
 
-The camera radio uses Webots channel 40. The vibration radio uses channel 41.
+For a Webots capture, the JPEG first uses HTTP so Flask can serve it later. For a dashboard sample/upload in Webots mode, input metadata reaches the Webots edge over MQTT. In both cases, the inference result uses the simulated radio/gateway path.
 
-### 7.2 Frame implementation
+## 9. Vibration inference
 
-`gateway/radio.py` implements a local LoRaWAN 1.0-style unconfirmed ABP uplink:
+The orange Webots node has no accelerometer device or physical dynamics. Its controller generates one synthetic sample per 32 ms Webots basic time step with NumPy seed 2026.
 
-- separate device addresses and session keys for both edge devices;
-- AES payload encryption;
-- AES-CMAC message integrity code;
-- uplink frame counters;
-- replay and large-counter-gap rejection;
-- application-specific fragmentation and reassembly;
-- maximum Webots radio frame length of 64 bytes;
-- 43 application bytes per fragment.
+Configuration:
 
-Camera results are JSON and may require multiple fragments. Vibration results are encoded into a 29-byte binary application payload and fit within one uplink frame.
+- window: 64 non-overlapping samples
+- rate: 31.25 Hz
+- duration: approximately 2.05 seconds
+- baseline: zero-mean normal noise, standard deviation 0.01
+- anomaly: 8 Hz sinusoid, amplitude 0.55
+- automatic anomaly: every fourth window
+- manual trigger: `V` in the focused Edge-2 Webots view
 
-This implementation demonstrates encrypted frame handling and gateway/application integration. It does not simulate RF propagation, spreading factors, frequencies, airtime, duty cycle, adaptive data rate, join procedures, downlinks, or a physical LoRaWAN gateway.
+The controller subtracts each completed window's mean before inference.
 
-RGB images never travel over the simulated LoRaWAN path. Only compact inference results and metadata use it. The temporary image remains available through local HTTP for annotation and optional YOLO11m verification.
+`TinyVibrationCNN` is:
 
-## 8. MQTT implementation
+```text
+Conv1d(1, 8, kernel=5, padding=2)
+ReLU
+MaxPool1d(2)
+Conv1d(8, 16, kernel=3, padding=1)
+ReLU
+AdaptiveAvgPool1d(1)
+Linear(16, 2)
+```
 
-All MQTT messages use QoS 1.
+It has 482 trainable parameters and predicts `normal` or `vibration_anomaly`. PyTorch uses one CPU thread in this controller. The resource profile describes a 512 MB, 2 W low-power target, but does not constrain the laptop.
+
+`vibration/train_model.py` reproducibly creates 600 generated examples per class with seed 20261122, trains for 80 full-batch epochs, saves the state dictionary, and records metadata. Its reported training accuracy is evaluated on those same generated training examples. There is no independent validation/test set or field-labelled data.
+
+## 10. Vibration payload and cloud handling
+
+`vibration/payload.py` packs this 29-byte little-endian structure:
+
+```text
+16-byte UUID
+4-byte Unix timestamp
+1-byte class index
+2-byte confidence x 10,000
+2-byte RMS g x 10,000
+2-byte peak g x 10,000
+2-byte latency milliseconds x 1,000
+```
+
+The fixed zone string is deliberately not repeated in those 29 bytes. The decoder restores model, window, rate, edge ID, resource-profile metadata, and `zone: north-gate` from shared device configuration after the network server reconstructs the application bytes. The application server persists that zone in `vibration_events`, and the dashboard shows it beside the sensor result.
+
+The cloud stores each new vibration `event_id`. Classification `vibration_anomaly` sets `alert=true` and is published to `perimeter/alerts`. Duplicate IDs are ignored.
+
+## 11. Simulated radio framing
+
+`gateway/radio.py` implements a local LoRaWAN 1.0-style unconfirmed ABP uplink. It is deliberately limited to the application demonstration.
+
+### 11.1 Frame properties
+
+- MHDR byte: `0x40`
+- separate four-byte device addresses
+- FCtrl byte: zero
+- low 16 bits of the uplink counter in the frame
+- FPort: 1
+- AES-encrypted fragment payload
+- four-byte AES-CMAC MIC
+- maximum complete Webots packet: 64 bytes
+
+Application data is split into 43-byte chunks. Each plaintext fragment adds an eight-byte local header containing the first counter, fragment index, and fragment count. Up to 256 fragments are accepted.
+
+LoRaWAN-style payload encryption uses the application session key, device address, and full counter. MIC calculation uses the network session key. The decoder verifies device/header, length, port, counter gap, MIC, fragment order, and reassembly identity.
+
+Counters start at zero for each controller run. Replayed frames and jumps larger than 16,384 are rejected. Fresh per-launch keys and fresh decoder state are why the complete launcher should be restarted after resetting Webots.
+
+### 11.2 Transport path
+
+- Camera controller sends on Webots radio channel 40.
+- Vibration controller sends on channel 41.
+- The gateway has one receiver for each channel.
+- The gateway sends the received byte sequence unchanged to UDP port 16803.
+- `gateway.network_server` selects a decoder by device address.
+- Camera JSON is reassembled directly; vibration bytes pass through the 29-byte codec.
+- The reconstructed event is published to the appropriate MQTT edge-result topic.
+
+The camera JSON can require several frames. The vibration payload fits in one.
+
+For presentation evidence, edge controllers print a readable application summary and payload size before transmission. The gateway prints the device address, frame counter, frame size and periodic forwarding progress rather than one noisy line per camera fragment. The network server prints the decoded application summary and total fragment count immediately before MQTT publication. Session keys and decrypted full camera JSON are not logged.
+
+### 11.3 Non-implemented radio behavior
+
+The code does not implement or model:
+
+- OTAA or ABP provisioning outside per-process environment variables;
+- join procedures, downlinks, acknowledgements, or confirmed data;
+- frequency plans, spreading factors, data rates, coding rates, or channels in the RF sense;
+- airtime, range, propagation, interference, packet loss, duty cycle, or ADR;
+- a physical end device, gateway, or external network server.
+
+The Webots Emitter/Receiver and localhost UDP bridge are simulated transport. The MQTT broker is not the LoRaWAN gateway.
+
+## 12. MQTT implementation
+
+`broker/app.py` starts an `amqtt` broker bound to the configured host/port. Anonymous authentication is enabled. Clients use Paho MQTT with protocol MQTT 3.1.1, QoS 1, and a 30-second keepalive.
 
 | Topic | Producer | Consumer | Purpose |
 | --- | --- | --- | --- |
-| `perimeter/camera/+/image` | Flask API or mock camera | YOLO11n edge service | Camera event metadata and image URL. |
-| `perimeter/edge/+/result` | Edge service or LoRa network server | Cloud service | Camera or vibration inference result. |
-| `perimeter/status/+/state` | Edge and cloud components | Cloud service/dashboard | Retained online/offline state and resource metadata. |
-| `perimeter/alerts` | Cloud service | Optional subscribers | Final camera or vibration alerts. |
-| `perimeter/cloud/<edge-id>/result` | Cloud service | Optional subscribers | Compact camera completion result. |
+| `perimeter/camera/+/image` | Flask or mock camera | RGB edge service | Camera metadata and image URL |
+| `perimeter/edge/+/result` | Default edge or Webots network server | Cloud service | Camera/vibration inference result |
+| `perimeter/status/+/state` | Edge and cloud processes | Cloud service/dashboard | Retained status/profile metadata |
+| `perimeter/alerts` | Cloud service | Optional external subscriber | Final alert object |
+| `perimeter/cloud/<edge-id>/result` | Cloud service | Optional external subscriber | Compact RGB completion object |
 
-In Webots mode, edge controllers still use MQTT for retained component status. Camera and vibration inference results use the simulated radio/gateway path before entering MQTT.
+In Webots mode, both edge controllers still use MQTT for retained status, and the RGB controller subscribes to camera input events. Only inference results take the simulated radio path before returning to MQTT.
 
-## 9. Flask API
+There is no MQTT user authentication, authorization policy, or TLS.
 
-| Method and route | Purpose |
+## 13. Flask API
+
+| Method and route | Success behavior |
 | --- | --- |
-| `GET /` | Dashboard page. |
-| `GET /api/health` | Cloud/MQTT readiness. |
-| `GET /api/status` | Broker, camera edge, vibration edge, and cloud state. |
-| `GET /api/images` | Built-in sample list. |
-| `GET /api/events` | Recent camera events. |
-| `GET /api/vibration-events` | Recent vibration events. |
-| `POST /api/run` | Queue a built-in sample through MQTT. |
-| `POST /api/upload` | Validate/store an uploaded image and queue it through MQTT. |
-| `POST /api/webots/capture` | Store a Webots camera frame and return its event metadata. |
-| `GET /uploads/<id>` | Serve an in-memory temporary JPEG. |
-| `POST /api/reset` | Clear both event tables and in-memory uploads. |
+| `GET /` | Render dashboard |
+| `GET /api/health` | Return cloud, MQTT, and model readiness fields |
+| `GET /api/status` | Return broker, RGB edge, vibration edge, and cloud state |
+| `GET /api/images` | Return the nine built-in samples |
+| `GET /api/events?limit=N` | Return newest RGB records; limit clamped to 1–50 |
+| `GET /api/vibration-events?limit=N` | Return newest vibration records; limit clamped to 1–50 |
+| `POST /api/run` | Publish a selected sample; HTTP 202 |
+| `POST /api/upload` | Store and publish an uploaded image; HTTP 202 |
+| `POST /api/webots/capture` | Store a Webots frame and return its event; HTTP 201 |
+| `GET /uploads/<id>` | Serve an in-memory JPEG with `no-store` caching |
+| `POST /api/reset` | Delete all event rows and clear uploads |
 
-The browser polls status every 3 seconds and event data every 2 seconds. These reads do not trigger inference.
+Both sample and upload input routes return 503 when MQTT is unavailable. Malformed selections/images return 400; oversized image data returns 413.
 
-## 10. Persistence
+The development API has no user authentication, CSRF protection, rate limiting, or reset confirmation.
 
-SQLite stores two tables.
+## 14. Persistence
 
-The `events` table stores camera event identity, source and URL, edge and final summaries, detections, execution location, decision reason, edge/cloud latency, alert state, Webots sensor metadata, and the annotated image.
+`cloud.app` creates `perimeter_events.db` in the repository root.
 
-The `vibration_events` table stores event identity, edge ID, classification, confidence, RMS and peak values, inference latency, model details, sample configuration, resource profile, and alert state.
+### 14.1 `events`
 
-Built-in sample records can persist across restarts. Browser and Webots images are stored only in memory, and upload-sourced camera records are deleted during application initialization because their URLs are no longer valid after restart.
+Stored fields include:
 
-`perimeter_events.db` is generated runtime state, not source data or a labelled evaluation dataset.
+- unique event ID and receive time;
+- image name, URL, and source;
+- edge summary and JSON detections;
+- final summary and JSON detections;
+- execution location and decision reason;
+- edge and cloud latency;
+- alert flag;
+- JSON sensor readings;
+- Base64 annotated JPEG.
 
-## 11. Startup, readiness, and shutdown
+At initialization, code migrates an older table containing `expected_label` into the current answer-free schema if encountered. It also adds `sensor_readings` to an older compatible table when necessary.
 
-`run_demo.py` performs these checks:
+### 14.2 `vibration_events`
 
-1. Confirms required model files exist.
-2. Starts the broker and waits for an MQTT connection.
-3. Starts Flask and waits for `/api/health`.
-4. Starts the logical edge, or the Webots network server and Webots.
-5. Polls `/api/status` until the required edge services report online.
-6. Prints the ready message and monitors child processes.
+Stored fields include event/edge IDs, receive time, class, confidence, RMS, peak, latency, model name, parameter count, rate, window size, JSON resource profile, and alert flag.
 
-Press `Ctrl+C` once in the launching PowerShell window to stop the complete process tree. The launcher ignores additional interrupt signals during cleanup and uses Windows process-tree termination for child services.
+### 14.3 Durability rules
 
-Before restarting after an abnormal termination, confirm that ports 1883, 8000, and UDP 16803 are not owned by stale processes.
+Built-in sample records can remain across restarts. Browser and Webots images exist only in memory and use source `upload`; their event rows are deleted during cloud initialization because the corresponding URLs no longer exist.
 
-## 12. Validation
+The database is generated application state. It is not source data, a labelled dataset, or accuracy evidence.
 
-Run from the repository root:
+## 15. Browser behavior
+
+`cloud/static/app.js` performs no ML. It:
+
+- retrieves the sample list;
+- sends sample/upload requests;
+- polls component status every 3 seconds;
+- polls camera and vibration events every 2 seconds;
+- renders server-provided summaries and detections;
+- displays the Base64 image already annotated by the cloud;
+- derives visible log lines from stored event records;
+- and calls `POST /api/reset` from the clear button.
+
+These polling GET requests do not publish MQTT messages or invoke models. Closing the tab stops browser polling while backend services remain active.
+
+## 16. Source map
+
+| File | Responsibility |
+| --- | --- |
+| `run_demo.py` | Process startup, model checks, readiness, session keys, monitoring, cleanup |
+| `config.py` | Shared IDs, paths, ports, topics, profiles, samples, security classes |
+| `broker/app.py` | Embedded MQTT broker |
+| `edge/app.py` | YOLO11n, summaries, offloading, logical edge service |
+| `cloud/app.py` | Flask, YOLO11m, annotation, MQTT handling, alerts, SQLite |
+| `sensor/mock_sensor.py` | Direct MQTT sample publisher |
+| `gateway/radio.py` | Encryption, MIC, counters, fragmentation, reassembly |
+| `gateway/network_server.py` | UDP reception, device decoding, MQTT publication |
+| `vibration/model.py` | 482-parameter CNN |
+| `vibration/payload.py` | 29-byte binary result codec |
+| `vibration/train_model.py` | Reproducible generated-signal training |
+| `webots/worlds/edge1_camera_jetson.wbt` | Edge-1 camera/Jetson-profile scene |
+| `webots/worlds/edge2_vibration_device.wbt` | Edge-2 simple vibration-device scene |
+| `webots/controllers/camera_edge/` | Edge-1 camera, YOLO11n and uplink |
+| `webots/controllers/vibration_edge/` | Synthetic sensor, CNN, and uplink |
+| `webots/controllers/perimeter_gateway/` | Reusable radio-to-UDP relay for both worlds |
+| `webots/controllers/scene_labels/` | World-specific legends and controls |
+| `cloud/templates/index.html` | Dashboard markup |
+| `cloud/static/app.js` | HTTP actions, polling, rendering |
+| `tests/test_models.py` | Assets, inputs, policy, profile, vibration model checks |
+| `tests/test_uplink.py` | Radio and compact-payload checks |
+
+## 17. Validation coverage
+
+Run:
 
 ```powershell
 .\myenv\Scripts\python.exe -B -m unittest discover -s tests -v
@@ -293,41 +480,47 @@ Run from the repository root:
 node --check cloud\static\app.js
 ```
 
-The Python suite covers model assets, samples, topics, security summaries, offloading, answer-free input events, the vibration model/profile, independent LoRaWAN device keys, compact vibration payloads, fragmentation, integrity checking, and replay rejection.
+The 14 Python tests verify:
 
-For an end-to-end Webots check, wait for the launcher ready message and confirm terminal entries from `[edge]`, `[vibration-edge]`, `[network]`, and `[cloud]`.
+- YOLO checkpoint and sample-image presence;
+- separate Edge-1 and Edge-2 Webots world assignments;
+- no answer tag in sample or upload events;
+- security summary and offloading behavior;
+- topic helpers;
+- explicit simulated Jetson/profile metadata;
+- vibration checkpoint shape and sub-1,000 parameter size;
+- independent camera/vibration addresses and keys;
+- multi-frame JSON round trip;
+- maximum 64-byte radio frames;
+- compact single-frame vibration payload;
+- tamper rejection, missing-fragment behavior, and replay rejection.
 
-## 13. Main source files
+The unit tests do not execute a full YOLO prediction, launch services, open Webots, measure accuracy, or validate physical performance. An end-to-end Webots check should confirm `[edge]`, `[vibration-edge]`, `[network]`, and `[cloud]` messages and dashboard records.
 
-| File | Implementation responsibility |
-| --- | --- |
-| `run_demo.py` | Process launcher, model checks, readiness, keys, and cleanup. |
-| `config.py` | Ports, topics, model paths, IDs, classes, samples, and resource profiles. |
-| `broker/app.py` | Embedded `amqtt` broker. |
-| `edge/app.py` | YOLO11n inference, summaries, offloading, and logical-edge MQTT service. |
-| `cloud/app.py` | Flask, YOLO11m, annotation, MQTT consumption, alerts, and SQLite. |
-| `gateway/radio.py` | Simulated LoRaWAN framing, encryption, MIC, counters, and reassembly. |
-| `gateway/network_server.py` | UDP gateway backhaul decoding and MQTT publication. |
-| `vibration/model.py` | 482-parameter 1D CNN. |
-| `vibration/payload.py` | Compact 29-byte vibration payload. |
-| `vibration/train_model.py` | Reproducible synthetic model training. |
-| `webots/worlds/perimeter.wbt` | Scene, devices, radio channels, and controller assignments. |
-| `webots/controllers/perimeter_edge/` | Webots camera capture and YOLO11n result uplink. |
-| `webots/controllers/vibration_edge/` | Synthetic vibration window generation and CNN uplink. |
-| `webots/controllers/perimeter_gateway/` | Radio-to-UDP forwarding. |
-| `cloud/static/app.js` | Dashboard requests, polling, and rendering. |
+## 18. Current limitations
 
-## 14. Current limitations and future physical deployment
+The project does not currently provide:
 
-The implementation does not currently provide:
+- Jetson, ARM, CUDA, TensorRT, or target GPU execution;
+- real camera, accelerometer, or vibration hardware;
+- physical LoRa radios or measured network behavior;
+- a complete standards-compliant LoRaWAN network;
+- ground-truth site labels or field accuracy evaluation;
+- measured power, energy, temperature, carbon intensity, or SCI;
+- a learned, SLA-aware, or carbon-aware offloading policy;
+- durable uploaded-image storage;
+- MQTT/HTTP authentication, TLS, authorization, user accounts, or production hosting.
 
-- physical Jetson execution, CUDA, TensorRT, or ARM emulation;
-- real camera or vibration hardware;
-- physical LoRa radios or measured network behaviour;
-- field-labelled accuracy evaluation;
-- measured power, energy, temperature, or SCI values;
-- learned, SLA-aware, or carbon-aware offloading;
-- MQTT authentication, TLS, user accounts, or production security;
-- production Flask hosting or durable uploaded-image storage.
+The YOLO checkpoints are pretrained COCO models, but COCO metrics are not accuracy at the intended site. The vibration model's generated-data training score is not field accuracy. The dashboard samples are demonstrations, not an evaluation dataset.
 
-A physical deployment should run an exported TensorRT YOLO11n model on a Jetson, acquire synchronized real sensor data, use a real LoRaWAN end device/gateway/network server for compact results, transfer selected images over an IP-capable link, and measure latency and energy on the target hardware.
+## 19. Physical-deployment direction
+
+A physical implementation should:
+
+1. export and benchmark YOLO11n with TensorRT on the target Jetson;
+2. select a CUDA/TensorRT runtime and measure end-to-end latency on that device;
+3. acquire synchronized real camera and vibration data with independent labels;
+4. use a real LoRaWAN end device, gateway, network server, and regional settings for compact results;
+5. send selected images over Wi-Fi, Ethernet, cellular, or another IP-capable path;
+6. add authenticated, encrypted service communication and production hosting;
+7. measure energy and carbon inputs on actual hardware before reporting SCI or carbon-aware behavior.

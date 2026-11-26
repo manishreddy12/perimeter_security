@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 
 from gateway.radio import UplinkDecoder, UplinkEncoder
+from config import PERIMETER_ZONE
 from vibration.payload import decode_vibration_event, encode_vibration_event
 
 
@@ -85,3 +86,4 @@ class UplinkTests(unittest.TestCase):
         decoded = decode_vibration_event(decoder.decode(frames[0]))
         self.assertEqual(decoded["event_id"], event["event_id"])
         self.assertEqual(decoded["classification"], "vibration_anomaly")
+        self.assertEqual(decoded["zone"], PERIMETER_ZONE)

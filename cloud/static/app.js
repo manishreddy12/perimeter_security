@@ -148,12 +148,13 @@ async function refreshEvents() {
 
 function renderVibrationEvents(events) {
   if (!events.length) {
-    byId("vibration-events").innerHTML = '<tr><td colspan="6" class="empty">Waiting for vibration windows...</td></tr>';
+    byId("vibration-events").innerHTML = '<tr><td colspan="7" class="empty">Waiting for vibration windows...</td></tr>';
     return;
   }
   byId("vibration-events").innerHTML = events.map(event => `
     <tr>
       <td>${new Date(event.received_at).toLocaleTimeString()}</td>
+      <td>${escapeHtml(event.zone || "north-gate")}</td>
       <td><span class="result ${event.alert ? "danger" : ""}">${escapeHtml(event.classification)}</span></td>
       <td>${(Number(event.confidence) * 100).toFixed(1)}%</td>
       <td>${Number(event.rms_g).toFixed(4)} g</td>
@@ -175,11 +176,9 @@ async function refreshStatus() {
     const data = await api("/api/status");
     const online = data.mqtt_broker.status === "ok"
       && data.edge.status === "online"
-      && (!data.webots_mode || data.vibration_edge.status === "online");
+      && data.vibration_edge.status === "online";
     byId("status").textContent = online
-      ? (data.webots_mode
-        ? `ONLINE | ${data.edge.model} camera | ${data.vibration_edge.model} vibration | ${data.cloud.model} cloud`
-        : `ONLINE | ${data.edge.model} edge | ${data.cloud.model} cloud`)
+      ? `ONLINE | ${data.edge.model} camera | ${data.vibration_edge.model} vibration | ${data.cloud.model} cloud`
       : "WAITING FOR EDGE DEVICES";
     byId("status").className = `status ${online ? "online" : "waiting"}`;
   } catch {

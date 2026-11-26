@@ -1,4 +1,5 @@
 import sys
+import json
 from pathlib import Path
 from queue import Empty, Queue
 
@@ -10,7 +11,13 @@ import cv2
 import numpy as np
 import requests
 
-from config import CLOUD_URL, JETSON_NANO_PROFILE, MQTT_HOST, MQTT_PORT
+from config import (
+    CAMERA_LORAWAN_DEVICE,
+    CLOUD_URL,
+    JETSON_NANO_PROFILE,
+    MQTT_HOST,
+    MQTT_PORT,
+)
 from edge.app import EdgeService
 from gateway.radio import UplinkEncoder
 
@@ -30,7 +37,7 @@ def main():
     service = EdgeService(
         MQTT_HOST,
         MQTT_PORT,
-        "webots-jetson-nano",
+        "webots-edge-1-jetson-nano",
         publish_result=outgoing.put,
         device_profile=JETSON_NANO_PROFILE,
     )
@@ -63,17 +70,38 @@ def main():
                         }
                         service.report_result(event, service.model.predict_frame(image))
                     except requests.RequestException as exc:
-                        print(f"[edge] camera capture failed: {exc}", flush=True)
+                        print(f"[camera-edge] camera capture failed: {exc}", flush=True)
             capture_pressed = pressed
             try:
                 result = outgoing.get_nowait()
             except Empty:
                 continue
             try:
-                for frame in encoder.encode(result):
-                    emitter.send(frame)
+                payload = json.dumps(result, separators=(",", ":"), ensure_ascii=True).encode()
+                radio_frames = list(encoder.encode_bytes(payload))
+                edge_result = result["edge_result"]
+                detections = edge_result["detections"]
+                maximum_confidence = max(
+                    (float(item["confidence"]) for item in detections), default=0.0
+                )
+                print(
+                    f"[lorawan-tx][edge-1] "
+                    f"zone={result['camera_event'].get('zone', 'north-gate')} "
+                    f"devaddr={CAMERA_LORAWAN_DEVICE.upper()} "
+                    f"event={result['event_id'][:8]} payload={len(payload)}B "
+                    f"fragments={len(radio_frames)}",
+                    flush=True,
+                )
+                print(
+                    f"[lorawan-payload][edge-1] object={edge_result['summary']} "
+                    f"confidence={maximum_confidence:.1%} boxes={len(detections)} "
+                    f"decision={result['offload']['selected_location']} image_ref=HTTP_URL",
+                    flush=True,
+                )
+                for radio_frame in radio_frames:
+                    emitter.send(radio_frame)
             except ValueError as exc:
-                print(f"[edge] could not send uplink: {exc}", flush=True)
+                print(f"[camera-edge] could not send uplink: {exc}", flush=True)
     finally:
         service.publish_status("offline")
         service.client.disconnect()

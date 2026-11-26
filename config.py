@@ -5,7 +5,6 @@ from pathlib import Path
 
 
 BASE_DIR = Path(__file__).resolve().parent
-WEBOTS_MODE = os.getenv("PERIMETER_WEBOTS_MODE", "0") == "1"
 CLOUD_HOST = os.getenv("PERIMETER_CLOUD_HOST", "127.0.0.1")
 CLOUD_PORT = int(os.getenv("PERIMETER_CLOUD_PORT", "8000"))
 CLOUD_URL = f"http://{CLOUD_HOST}:{CLOUD_PORT}"
@@ -21,6 +20,7 @@ ALERT_TOPIC = "perimeter/alerts"
 
 EDGE_ID = "simulated-edge-01"
 VIBRATION_EDGE_ID = "vibration-edge-01"
+PERIMETER_ZONE = "north-gate"
 EDGE_MODEL_PATH = BASE_DIR / "yolo11n.pt"
 CLOUD_MODEL_PATH = BASE_DIR / "yolo11m.pt"
 VIBRATION_MODEL_PATH = BASE_DIR / "vibration" / "tiny_vibration_cnn.pt"

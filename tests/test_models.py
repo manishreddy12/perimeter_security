@@ -14,12 +14,14 @@ from config import (
     DEMO_IMAGES,
     EDGE_MODEL_PATH,
     JETSON_NANO_PROFILE,
+    PERIMETER_ZONE,
     VIBRATION_EDGE_PROFILE,
     VIBRATION_MODEL_PATH,
     edge_topic,
     sensor_topic,
 )
 from edge.app import choose_location, summarize
+from run_demo import WEBOTS_WORLDS
 from vibration.model import CLASS_NAMES, WINDOW_SIZE, TinyVibrationCNN, parameter_count
 
 
@@ -57,6 +59,7 @@ class DemoTests(unittest.TestCase):
             event = json.loads(fake.messages[-1][1])
             self.assertNotIn("expected_label", event)
             self.assertEqual(event["source"], "sample")
+            self.assertEqual(event["zone"], PERIMETER_ZONE)
         finally:
             cloud_app.mqtt_client = None
             cloud_app.broker_connected.clear()
@@ -112,17 +115,24 @@ class DemoTests(unittest.TestCase):
         self.assertEqual(VIBRATION_EDGE_PROFILE["memory_mb"], 512)
         self.assertEqual(JETSON_NANO_PROFILE["memory_mb"], 4096)
 
-    def test_status_tells_dashboard_which_mode_is_active(self) -> None:
-        original = cloud_app.WEBOTS_MODE
-        try:
-            cloud_app.WEBOTS_MODE = False
-            standard = cloud_app.app.test_client().get("/api/status").get_json()
-            cloud_app.WEBOTS_MODE = True
-            webots = cloud_app.app.test_client().get("/api/status").get_json()
-        finally:
-            cloud_app.WEBOTS_MODE = original
-        self.assertFalse(standard["webots_mode"])
-        self.assertTrue(webots["webots_mode"])
+    def test_each_edge_has_a_separate_webots_world(self) -> None:
+        self.assertEqual(len(WEBOTS_WORLDS), 2)
+        camera_world, vibration_world = WEBOTS_WORLDS
+        self.assertTrue(camera_world.exists())
+        self.assertTrue(vibration_world.exists())
+        camera_text = camera_world.read_text(encoding="utf-8")
+        vibration_text = vibration_world.read_text(encoding="utf-8")
+        self.assertIn('controller "camera_edge"', camera_text)
+        self.assertNotIn('controller "vibration_edge"', camera_text)
+        self.assertIn('controller "vibration_edge"', vibration_text)
+        self.assertNotIn('controller "camera_edge"', vibration_text)
+        self.assertIn('controller "perimeter_gateway"', camera_text)
+        self.assertIn('controller "perimeter_gateway"', vibration_text)
+        shared_fence = 'translation 3 0 1\n  name "North Gate monitored fence"'
+        self.assertIn(shared_fence, camera_text)
+        self.assertIn(shared_fence, vibration_text)
+        self.assertIn('translation 2.82 -0.75 0.8', camera_text)
+        self.assertIn('translation 2.82 -0.75 0.8', vibration_text)
 
 
 if __name__ == "__main__":

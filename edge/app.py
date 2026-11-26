@@ -167,6 +167,8 @@ class EdgeService:
 
     def on_message(self, client, userdata, message) -> None:
         try:
+            if not message.topic.startswith("perimeter/camera/"):
+                return
             event = json.loads(message.payload.decode("utf-8"))
             if "image_url" not in event or "event_id" not in event:
                 print(f"[edge] ignored malformed camera event on {message.topic}", flush=True)

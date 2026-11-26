@@ -1,8 +1,10 @@
 __pycache__/
 *.py[cod]
+.runtime/
+Microsoft/
+*.log
 .venv/
 myenv/
+myenv_broken_*/
 perimeter_events.db*
-.runtime/
-*.log
-*.wbproj
+webots/worlds/.*.wbproj

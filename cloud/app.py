@@ -32,12 +32,12 @@ from config import (
     MQTT_KEEPALIVE,
     MQTT_PORT,
     MQTT_QOS,
+    PERIMETER_ZONE,
     PERSON_CLASSES,
     SECURITY_CLASSES,
     STATUS_TOPIC,
     VEHICLE_CLASSES,
     VIBRATION_EDGE_ID,
-    WEBOTS_MODE,
     sensor_topic,
     status_topic,
 )
@@ -101,6 +101,7 @@ def create_vibration_events_table(connection: sqlite3.Connection) -> None:
                 event_id TEXT NOT NULL UNIQUE,
                 received_at TEXT NOT NULL,
                 edge_id TEXT NOT NULL,
+                zone TEXT NOT NULL,
                 classification TEXT NOT NULL,
                 confidence REAL NOT NULL,
                 rms_g REAL NOT NULL,
@@ -120,6 +121,15 @@ def create_vibration_events_table(connection: sqlite3.Connection) -> None:
 def initialize_database() -> None:
     with connect_db() as connection:
         create_vibration_events_table(connection)
+        vibration_columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(vibration_events)").fetchall()
+        }
+        if vibration_columns and "zone" not in vibration_columns:
+            connection.execute(
+                "ALTER TABLE vibration_events ADD COLUMN zone TEXT NOT NULL "
+                f"DEFAULT '{PERIMETER_ZONE}'"
+            )
         columns = {
             str(row["name"]) for row in connection.execute("PRAGMA table_info(events)").fetchall()
         }
@@ -183,6 +193,7 @@ def insert_vibration_event(payload: dict[str, Any]) -> dict[str, Any]:
         "event_id": str(payload["event_id"]),
         "received_at": now_iso(),
         "edge_id": str(payload["edge_id"]),
+        "zone": str(payload.get("zone", PERIMETER_ZONE)),
         "classification": classification,
         "confidence": float(payload["confidence"]),
         "rms_g": float(payload["rms_g"]),
@@ -449,7 +460,6 @@ def status():
             "mqtt_broker": {"status": "ok" if broker_connected.is_set() else "unreachable"},
             "edge": edge,
             "vibration_edge": vibration_edge,
-            "webots_mode": WEBOTS_MODE,
             "cloud": cloud_status("online"),
         }
     )
@@ -495,7 +505,7 @@ def run_image():
         "event_id": str(uuid.uuid4()),
         "timestamp": now_iso(),
         "camera_id": "rgb-camera-01",
-        "zone": "north-gate",
+        "zone": PERIMETER_ZONE,
         "image_name": details["title"],
         "image_url": request.host_url.rstrip("/") + relative_url,
         "source": "sample",
@@ -555,7 +565,7 @@ def store_image(camera_id: str):
         "event_id": str(uuid.uuid4()),
         "timestamp": now_iso(),
         "camera_id": camera_id,
-        "zone": "north-gate",
+        "zone": PERIMETER_ZONE,
         "image_name": display_name,
         "image_url": request.host_url.rstrip("/") + relative_url,
         "source": "upload",
